@@ -1,0 +1,171 @@
+// ===== CONFIGURATION =====
+const CONFIG = {
+  USERNAME: 'ians141',
+  MONTHS_TO_FETCH: 2, // 0 = all history
+  
+  // Spreadsheet IDs (set after running setup functions)
+  CONTROL_SPREADSHEET_ID: '1S5rXE_BikLTE0NY92JI1C1scp-8LTbd5LoWcbJCv9NI', // Set after setupControlSpreadsheet()
+  CALLBACK_DATA_SPREADSHEET_ID: '1mVEZtxwtQOKA0B3wzuIb77VDvn69HmGK738LxWcOAYc', // Set after setupCallbackDataSpreadsheet()
+  
+  // Performance settings
+  CALLBACK_BATCH_SIZE: 11,
+  DUPLICATE_CHECK_ROWS: 200,
+  GAME_INDEX_CACHE_SIZE: 500
+};
+
+// ===== SHEETS =====
+const SHEETS = {
+  GAMES: 'Games',
+  CONTROL: {
+    ARCHIVES: 'Archives',
+    REGISTRY: 'Game Registry',
+    RATINGS: 'Ratings',
+    CONFIG: 'Config'
+  }
+};
+
+// ===== COLUMN INDICES =====
+const GAMES_COLS = {
+  GAME_ID: 1,
+  TYPE: 2,
+  GAME_URL: 3,
+  START_DATETIME: 4,
+  START_DATE: 5,
+  START_TIME: 6,
+  START_EPOCH: 7,
+  END_DATETIME: 8,
+  END_DATE: 9,
+  END_TIME: 10,
+  END_EPOCH: 11,
+  END_SERIAL: 12,
+  ARCHIVE: 13,
+  RULES: 14,
+  LIVE: 15,
+  TIME_CLASS: 16,
+  FORMAT: 17,
+  RATED: 18,
+  TIME_CONTROL: 19,
+  BASE: 20,
+  INC: 21,
+  CORR: 22,
+  DURATION: 23,
+  DURATION_S: 24,
+  COLOR: 25,
+  OPPONENT: 26,
+  MY_RATING: 27,
+  OPP_RATING: 28,
+  RATING_BEFORE: 29,
+  RATING_DELTA: 30,
+  OUTCOME: 31,
+  TERMINATION: 32,
+  ECO: 33,
+  ECO_URL: 34,
+  OPENING_NAME: 35,
+  OPENING_SLUG: 36,
+  OPENING_FAMILY: 37,
+  OPENING_BASE: 38,
+  VAR_1: 39,
+  VAR_2: 40,
+  VAR_3: 41,
+  VAR_4: 42,
+  VAR_5: 43,
+  VAR_6: 44,
+  EXTRA_MOVES: 45,
+  MOVES: 46,
+  TCN: 47,
+  CLOCKS: 48,
+  RATINGS_LEDGER: 49
+};
+
+const ARCHIVE_COLS = {
+  ARCHIVE: 1,
+  YEAR: 2,
+  MONTH: 3,
+  STATUS: 4,
+  GAME_COUNT: 5,
+  DATE_CREATED: 6,
+  LAST_CHECKED: 7,
+  LAST_FETCHED: 8,
+  ETAG: 9,
+  DATA_LOCATION: 10,
+  NOTES: 11
+};
+
+const REGISTRY_COLS = {
+  GAME_ID: 1,
+  ARCHIVE: 2,
+  DATE: 3,
+  FORMAT: 4,
+  DATE_ADDED: 5,
+  CALLBACK_STATUS: 6,
+  CALLBACK_DATE: 7,
+  FUTURE_ENRICH_1_STATUS: 8,
+  FUTURE_ENRICH_1_DATE: 9,
+  DATA_LOCATION: 10
+};
+
+const RATINGS_COLS = {
+  GAME_ID: 1,
+  GAME_URL: 2,
+  ARCHIVE: 3,
+  DATE: 4,
+  FORMAT: 5,
+  MY_RATING: 6,
+  MY_RATING_LAST: 7,
+  MY_RATING_DELTA_LAST: 8,
+  OPP_RATING: 9,
+  OPP_RATING_DELTA_LAST: 10,
+  OPP_RATING_LAST: 11,
+  CALLBACK_STATUS: 12,
+  CALLBACK_DATE: 13,
+  MY_PREGAME_CALLBACK: 14,
+  MY_DELTA_CALLBACK: 15,
+  OPP_PREGAME_CALLBACK: 16,
+  OPP_DELTA_CALLBACK: 17,
+  MY_PREGAME_EFFECTIVE: 18,
+  MY_DELTA_EFFECTIVE: 19,
+  OPP_PREGAME_EFFECTIVE: 20,
+  OPP_DELTA_EFFECTIVE: 21
+};
+
+const CALLBACK_COLS = {
+  GAME_ID: 1,
+  GAME_URL: 2,
+  CALLBACK_URL: 3,
+  END_TIME: 4,
+  MY_COLOR: 5,
+  TIME_CLASS: 6,
+  MY_RATING: 7,
+  OPP_RATING: 8,
+  MY_RATING_CHANGE: 9,
+  OPP_RATING_CHANGE: 10,
+  MY_RATING_BEFORE: 11,
+  OPP_RATING_BEFORE: 12,
+  BASE_TIME: 13,
+  TIME_INCREMENT: 14,
+  MOVE_TIMESTAMPS: 15,
+  MY_USERNAME: 16,
+  MY_COUNTRY: 17,
+  MY_MEMBERSHIP: 18,
+  MY_MEMBER_SINCE: 19,
+  MY_DEFAULT_TAB: 20,
+  MY_POST_MOVE_ACTION: 21,
+  MY_LOCATION: 22,
+  OPP_USERNAME: 23,
+  OPP_COUNTRY: 24,
+  OPP_MEMBERSHIP: 25,
+  OPP_MEMBER_SINCE: 26,
+  OPP_DEFAULT_TAB: 27,
+  OPP_POST_MOVE_ACTION: 28,
+  OPP_LOCATION: 29,
+  DATE_FETCHED: 30
+};
+
+// ===== CALLBACK STATUS VALUES =====
+const CALLBACK_STATUS = {
+  PENDING: null,           // Not yet fetched
+  FETCHED: 'fetched',      // Successfully fetched, rating data valid
+  NO_RATING: 'no_rating',  // Successfully fetched, but no rating change (unrated/provisional)
+  INVALID: 'invalid',      // API call succeeded but returned bad/unexpected data
+  ERROR: 'error'           // API call failed
+};
