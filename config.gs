@@ -1,171 +1,127 @@
-// ===== CONFIGURATION =====
+// ===== DYNAMIC CONFIGURATION SYSTEM =====
+// Uses Properties Service - no hardcoded spreadsheet IDs
+
 const CONFIG = {
-  USERNAME: 'ians141',
+  USERNAME: 'frankscobey',
   MONTHS_TO_FETCH: 2, // 0 = all history
-  
-  // Spreadsheet IDs (set after running setup functions)
-  CONTROL_SPREADSHEET_ID: '1S5rXE_BikLTE0NY92JI1C1scp-8LTbd5LoWcbJCv9NI', // Set after setupControlSpreadsheet()
-  CALLBACK_DATA_SPREADSHEET_ID: '1mVEZtxwtQOKA0B3wzuIb77VDvn69HmGK738LxWcOAYc', // Set after setupCallbackDataSpreadsheet()
-  
-  // Performance settings
   CALLBACK_BATCH_SIZE: 11,
-  DUPLICATE_CHECK_ROWS: 200,
-  GAME_INDEX_CACHE_SIZE: 500
+  DUPLICATE_CHECK_ROWS: 200
 };
 
-// ===== SHEETS =====
-const SHEETS = {
-  GAMES: 'Games',
-  CONTROL: {
-    ARCHIVES: 'Archives',
-    REGISTRY: 'Game Registry',
-    RATINGS: 'Ratings',
-    CONFIG: 'Config'
+// ===== PROPERTY KEYS =====
+const PROP_KEYS = {
+  CONTROL_SHEET_ID: 'CONTROL_SPREADSHEET_ID',
+  ENRICHMENT_SHEET_ID: 'ENRICHMENT_SPREADSHEET_ID',
+  LAST_ARCHIVE_CHECK: 'LAST_ARCHIVE_CHECK',
+  TOTAL_GAMES: 'TOTAL_GAMES'
+};
+
+// ===== GET/SET PROPERTIES =====
+function getProperty(key, defaultValue = null) {
+  const props = PropertiesService.getScriptProperties();
+  const value = props.getProperty(key);
+  return value || defaultValue;
+}
+
+function setProperty(key, value) {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(key, String(value));
+}
+
+// ===== GET SPREADSHEETS (WITH AUTO-CREATION) =====
+function getControlSpreadsheet() {
+  let id = getProperty(PROP_KEYS.CONTROL_SHEET_ID);
+  
+  if (!id) {
+    // Auto-create if doesn't exist
+    const ss = SpreadsheetApp.create('Chess Control - ' + CONFIG.USERNAME);
+    id = ss.getId();
+    setProperty(PROP_KEYS.CONTROL_SHEET_ID, id);
+    Logger.log('Created Control Spreadsheet: ' + id);
   }
-};
+  
+  return SpreadsheetApp.openById(id);
+}
 
-// ===== COLUMN INDICES =====
-const GAMES_COLS = {
-  GAME_ID: 1,
-  TYPE: 2,
-  GAME_URL: 3,
-  START_DATETIME: 4,
-  START_DATE: 5,
-  START_TIME: 6,
-  START_EPOCH: 7,
-  END_DATETIME: 8,
-  END_DATE: 9,
-  END_TIME: 10,
-  END_EPOCH: 11,
-  END_SERIAL: 12,
-  ARCHIVE: 13,
-  RULES: 14,
-  LIVE: 15,
-  TIME_CLASS: 16,
-  FORMAT: 17,
-  RATED: 18,
-  TIME_CONTROL: 19,
-  BASE: 20,
-  INC: 21,
-  CORR: 22,
-  DURATION: 23,
-  DURATION_S: 24,
-  COLOR: 25,
-  OPPONENT: 26,
-  MY_RATING: 27,
-  OPP_RATING: 28,
-  RATING_BEFORE: 29,
-  RATING_DELTA: 30,
-  OUTCOME: 31,
-  TERMINATION: 32,
-  ECO: 33,
-  ECO_URL: 34,
-  OPENING_NAME: 35,
-  OPENING_SLUG: 36,
-  OPENING_FAMILY: 37,
-  OPENING_BASE: 38,
-  VAR_1: 39,
-  VAR_2: 40,
-  VAR_3: 41,
-  VAR_4: 42,
-  VAR_5: 43,
-  VAR_6: 44,
-  EXTRA_MOVES: 45,
-  MOVES: 46,
-  TCN: 47,
-  CLOCKS: 48,
-  RATINGS_LEDGER: 49
-};
+function getEnrichmentSpreadsheet() {
+  let id = getProperty(PROP_KEYS.ENRICHMENT_SHEET_ID);
+  
+  if (!id) {
+    const ss = SpreadsheetApp.create('Chess Enrichment - ' + CONFIG.USERNAME);
+    id = ss.getId();
+    setProperty(PROP_KEYS.ENRICHMENT_SHEET_ID, id);
+    Logger.log('Created Enrichment Spreadsheet: ' + id);
+  }
+  
+  return SpreadsheetApp.openById(id);
+}
 
-const ARCHIVE_COLS = {
-  ARCHIVE: 1,
-  YEAR: 2,
-  MONTH: 3,
-  STATUS: 4,
-  GAME_COUNT: 5,
-  DATE_CREATED: 6,
-  LAST_CHECKED: 7,
-  LAST_FETCHED: 8,
-  ETAG: 9,
-  DATA_LOCATION: 10,
-  NOTES: 11
-};
+function getMainSpreadsheet() {
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
 
-const REGISTRY_COLS = {
-  GAME_ID: 1,
-  ARCHIVE: 2,
-  DATE: 3,
-  FORMAT: 4,
-  DATE_ADDED: 5,
-  CALLBACK_STATUS: 6,
-  CALLBACK_DATE: 7,
-  FUTURE_ENRICH_1_STATUS: 8,
-  FUTURE_ENRICH_1_DATE: 9,
-  DATA_LOCATION: 10
-};
+// ===== SHEET GETTERS =====
+function getGamesSheet() {
+  return getMainSpreadsheet().getSheetByName('Games');
+}
 
-const RATINGS_COLS = {
-  GAME_ID: 1,
-  GAME_URL: 2,
-  ARCHIVE: 3,
-  DATE: 4,
-  FORMAT: 5,
-  MY_RATING: 6,
-  MY_RATING_LAST: 7,
-  MY_RATING_DELTA_LAST: 8,
-  OPP_RATING: 9,
-  OPP_RATING_DELTA_LAST: 10,
-  OPP_RATING_LAST: 11,
-  CALLBACK_STATUS: 12,
-  CALLBACK_DATE: 13,
-  MY_PREGAME_CALLBACK: 14,
-  MY_DELTA_CALLBACK: 15,
-  OPP_PREGAME_CALLBACK: 16,
-  OPP_DELTA_CALLBACK: 17,
-  MY_PREGAME_EFFECTIVE: 18,
-  MY_DELTA_EFFECTIVE: 19,
-  OPP_PREGAME_EFFECTIVE: 20,
-  OPP_DELTA_EFFECTIVE: 21
-};
+function getArchivesSheet() {
+  return getControlSpreadsheet().getSheetByName('Archives');
+}
 
-const CALLBACK_COLS = {
-  GAME_ID: 1,
-  GAME_URL: 2,
-  CALLBACK_URL: 3,
-  END_TIME: 4,
-  MY_COLOR: 5,
-  TIME_CLASS: 6,
-  MY_RATING: 7,
-  OPP_RATING: 8,
-  MY_RATING_CHANGE: 9,
-  OPP_RATING_CHANGE: 10,
-  MY_RATING_BEFORE: 11,
-  OPP_RATING_BEFORE: 12,
-  BASE_TIME: 13,
-  TIME_INCREMENT: 14,
-  MOVE_TIMESTAMPS: 15,
-  MY_USERNAME: 16,
-  MY_COUNTRY: 17,
-  MY_MEMBERSHIP: 18,
-  MY_MEMBER_SINCE: 19,
-  MY_DEFAULT_TAB: 20,
-  MY_POST_MOVE_ACTION: 21,
-  MY_LOCATION: 22,
-  OPP_USERNAME: 23,
-  OPP_COUNTRY: 24,
-  OPP_MEMBERSHIP: 25,
-  OPP_MEMBER_SINCE: 26,
-  OPP_DEFAULT_TAB: 27,
-  OPP_POST_MOVE_ACTION: 28,
-  OPP_LOCATION: 29,
-  DATE_FETCHED: 30
-};
+function getRegistrySheet() {
+  return getControlSpreadsheet().getSheetByName('Registry');
+}
 
-// ===== CALLBACK STATUS VALUES =====
-const CALLBACK_STATUS = {
-  PENDING: null,           // Not yet fetched
-  FETCHED: 'fetched',      // Successfully fetched, rating data valid
-  NO_RATING: 'no_rating',  // Successfully fetched, but no rating change (unrated/provisional)
-  INVALID: 'invalid',      // API call succeeded but returned bad/unexpected data
-  ERROR: 'error'           // API call failed
-};
+function getCallbackSheet() {
+  return getEnrichmentSpreadsheet().getSheetByName('Callback Data');
+}
+
+function getLichessSheet() {
+  return getEnrichmentSpreadsheet().getSheetByName('Lichess Analysis');
+}
+
+function getSummarySheet() {
+  return getMainSpreadsheet().getSheetByName('Summary');
+}
+
+// ===== RESET ALL (FOR CLEAN START) =====
+function resetAllConnections() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert(
+    'Reset All Connections?',
+    'This will clear all stored spreadsheet IDs. The system will create new Control and Enrichment sheets on next run.\n\nYour Games sheet will NOT be deleted.\n\nContinue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response === ui.Button.YES) {
+    PropertiesService.getScriptProperties().deleteAllProperties();
+    ui.alert('✅ Reset complete! Run any function to auto-create new sheets.');
+  }
+}
+
+// ===== SHOW CURRENT CONFIGURATION =====
+function showConfiguration() {
+  const controlId = getProperty(PROP_KEYS.CONTROL_SHEET_ID, 'Not created yet');
+  const enrichmentId = getProperty(PROP_KEYS.ENRICHMENT_SHEET_ID, 'Not created yet');
+  
+  const htmlOutput = HtmlService.createHtmlOutput(`
+    <style>
+      body { font-family: Arial, sans-serif; padding: 20px; }
+      .info { margin: 10px 0; font-size: 14px; }
+      .id { font-family: monospace; background: #f5f5f5; padding: 5px; }
+    </style>
+    <h2>📊 Chess Tracker Configuration</h2>
+    <div class="info"><strong>Username:</strong> ${CONFIG.USERNAME}</div>
+    <div class="info"><strong>Main Spreadsheet:</strong> ${getMainSpreadsheet().getId()}</div>
+    <div class="info"><strong>Control Spreadsheet:</strong><br><span class="id">${controlId}</span></div>
+    <div class="info"><strong>Enrichment Spreadsheet:</strong><br><span class="id">${enrichmentId}</span></div>
+    <hr>
+    <p>All spreadsheet IDs are stored automatically using Properties Service.</p>
+    <p>Use "Reset All Connections" from the menu to start fresh.</p>
+  `)
+    .setWidth(500)
+    .setHeight(400);
+  
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'Configuration');
+}
