@@ -1824,8 +1824,12 @@ function enrichNewGamesWithCallbacks(count = 20) {
         Logger.log(`❌ NO DATA: Game ${gameId} - No callback data available`);
       }
       
-      // Rate limiting
-      Utilities.sleep(500);
+      // Batch rate limiting (5 games per batch, 1 second between batches)
+      if ((i + 1) % 5 === 0 && i < gameData.length - 1) {
+        Utilities.sleep(1000); // 1 second between batches
+      } else {
+        Utilities.sleep(200); // 200ms between individual games
+      }
       
     } catch (error) {
       const errorLog = {
@@ -2659,5 +2663,142 @@ function clearDuplicateData() {
     SpreadsheetApp.getUi().alert('✅ Cleared all duplicate data!\n\n• PropertiesService cleared\n• Drive files deleted\n• Sheets cleared\n\nReady for fresh data!');
   } catch (error) {
     SpreadsheetApp.getUi().alert(`❌ Error clearing data: ${error.message}`);
+  }
+}
+
+// ===== DEV MODE FUNCTIONS =====
+
+function storeMonthlyArchivesAsJSON() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ss.toast('🔧 Dev Mode: Storing monthly archives as JSON...', '⏳', -1);
+    
+    // Get all archives for ians141
+    const allArchives = getAllArchives(CONFIG.USERNAME);
+    Logger.log(`Found ${allArchives.length} archives to store`);
+    
+    const folder = getOrCreateDataFolder();
+    let storedCount = 0;
+    
+    for (const archive of allArchives) {
+      try {
+        Logger.log(`Storing: ${archive.url}`);
+        const response = UrlFetchApp.fetch(archive.url);
+        const data = JSON.parse(response.getContentText());
+        
+        if (data.games) {
+          // Create filename: YYYY-MM.json
+          const filename = `${archive.year}-${String(archive.month).padStart(2, '0')}.json`;
+          
+          // Store in Drive
+          const fileContent = JSON.stringify(data, null, 2);
+          folder.createFile(filename, fileContent);
+          
+          storedCount++;
+          Logger.log(`✅ Stored ${filename} with ${data.games.length} games`);
+        }
+        
+        Utilities.sleep(500); // Rate limiting
+      } catch (error) {
+        Logger.log(`❌ Error storing ${archive.url}: ${error.message}`);
+      }
+    }
+    
+    ss.toast(`✅ Dev Mode: Stored ${storedCount} monthly archives as JSON files!`, '✅', 5);
+    Logger.log(`Dev Mode: Stored ${storedCount} monthly archives`);
+  } catch (error) {
+    SpreadsheetApp.getUi().alert(`❌ Dev Mode Error: ${error.message}`);
+  }
+}
+
+function fetchFromStoredJSON() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEETS.GAMES);
+    
+    if (!sheet) {
+      SpreadsheetApp.getUi().alert('❌ Run "Setup Sheets" first!');
+      return;
+    }
+    
+    ss.toast('🔧 Dev Mode: Fetching from stored JSON files...', '⏳', -1);
+    
+    const folder = getOrCreateDataFolder();
+    const files = folder.getFiles();
+    const allGames = [];
+    
+    while (files.hasNext()) {
+      const file = files.next();
+      const fileName = file.getName();
+      
+      // Only process JSON files that look like monthly archives
+      if (fileName.match(/^\d{4}-\d{2}\.json$/)) {
+        try {
+          const content = file.getBlob().getDataAsString();
+          const data = JSON.parse(content);
+          
+          if (data.games) {
+            allGames.push(...data.games);
+            Logger.log(`✅ Loaded ${fileName} with ${data.games.length} games`);
+          }
+        } catch (error) {
+          Logger.log(`❌ Error loading ${fileName}: ${error.message}`);
+        }
+      }
+    }
+    
+    if (!allGames.length) {
+      ss.toast('❌ No stored JSON files found!', '❌', 3);
+      return;
+    }
+    
+    // Sort by end time
+    allGames.sort((a, b) => a.end_time - b.end_time);
+    
+    // Filter to new games only
+    const newGames = filterNewGames(allGames, sheet);
+    
+    if (!newGames.length) {
+      ss.toast('No new games from stored JSON', 'ℹ️', 3);
+      return;
+    }
+    
+    // Get current ratings ledger
+    const ledger = getLastLedger(sheet);
+    Logger.log('Starting ledger loaded: ' + JSON.stringify(ledger));
+    
+    // Process and write new games
+    ss.toast(`Processing ${newGames.length} new games from stored JSON...`, '⏳', -1);
+    const rows = processGames(newGames, CONFIG.USERNAME, ledger);
+    writeGamesToSheet(sheet, rows);
+    
+    ss.toast(`✅ ${newGames.length} new games from stored JSON!`, '✅', 5);
+    Logger.log(`Dev Mode: Processed ${newGames.length} games from stored JSON`);
+  } catch (error) {
+    SpreadsheetApp.getUi().alert(`❌ Dev Mode Error: ${error.message}`);
+  }
+}
+
+function clearStoredArchives() {
+  try {
+    const folder = getOrCreateDataFolder();
+    const files = folder.getFiles();
+    let deletedCount = 0;
+    
+    while (files.hasNext()) {
+      const file = files.next();
+      const fileName = file.getName();
+      
+      // Only delete JSON files that look like monthly archives
+      if (fileName.match(/^\d{4}-\d{2}\.json$/)) {
+        file.setTrashed(true);
+        deletedCount++;
+        Logger.log(`Deleted: ${fileName}`);
+      }
+    }
+    
+    SpreadsheetApp.getUi().alert(`✅ Dev Mode: Deleted ${deletedCount} stored archive files!`);
+  } catch (error) {
+    SpreadsheetApp.getUi().alert(`❌ Dev Mode Error: ${error.message}`);
   }
 }
