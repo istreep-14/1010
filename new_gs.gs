@@ -84,7 +84,14 @@ function fetchChesscomGames(fetchAll = false) {
     }
     
     // Get current ratings ledger
-    const ledger = getLastLedger(sheet);
+    let ledger = getLastLedger(sheet);
+    
+    // If ledger is empty and we have data, try to rebuild it
+    if (Object.keys(ledger).length === 0 && sheet.getLastRow() > 1) {
+      Logger.log('Ledger is empty, attempting to rebuild from existing data...');
+      ledger = rebuildLedgerFromSheet(sheet);
+    }
+    
     Logger.log('Starting ledger loaded: ' + JSON.stringify(ledger));
     
     // Process and write new games
@@ -188,24 +195,77 @@ function getLastLedger(sheet) {
   try {
     // Column AW is now column 49 (after removing Link column)
     const lastLedgerCell = sheet.getRange(sheet.getLastRow(), 49).getValue();
-    if (!lastLedgerCell || lastLedgerCell === '' || typeof lastLedgerCell !== 'string') {
+    if (!lastLedgerCell || lastLedgerCell === '') {
       Logger.log('No ledger found in last row, returning empty ledger');
       return {};
     }
     
-    // Clean the cell value before parsing
+    // Check if it's JSON format
     const cleanLedgerData = lastLedgerCell.trim();
-    if (cleanLedgerData === '') {
-      Logger.log('Empty ledger data, returning empty ledger');
-      return {};
+    if (cleanLedgerData.startsWith('{') && cleanLedgerData.endsWith('}')) {
+      // It's JSON format
+      const ledger = JSON.parse(cleanLedgerData);
+      Logger.log('Loaded JSON ledger from last row: ' + JSON.stringify(ledger));
+      return ledger;
+    } else {
+      // It's encoded format - decode it
+      const ledger = decodeLedger(cleanLedgerData);
+      Logger.log('Loaded encoded ledger from last row: ' + JSON.stringify(ledger));
+      return ledger;
     }
-    
-    const ledger = JSON.parse(cleanLedgerData);
-    Logger.log('Loaded ledger from last row: ' + JSON.stringify(ledger));
-    return ledger;
   } catch (e) {
     Logger.log('Could not parse ledger: ' + e.message);
     Logger.log('Ledger cell content: ' + JSON.stringify(sheet.getRange(sheet.getLastRow(), 49).getValue()));
+    return {};
+  }
+}
+
+/**
+ * Decode the encoded ledger format
+ */
+function decodeLedger(encodedData) {
+  try {
+    // The encoded format appears to be: "wk.xb.w4.w6.vs.uy.v7.ss.uk.s4.to.s4.t2.rs.sf.r4.rr.r5.r5.r6.qk.q6.od.ps.ns.pd.n5.ol.m9.nr.lj.mc.kx.mc.k8.km.jl.iw.j0.fs.ia.db.hl.cm.gy.9f.g7.86.fi.8e"
+    // This looks like it might be a compressed/encoded version of the ledger
+    // For now, return empty ledger and let the system rebuild it
+    Logger.log('Encoded ledger format detected, returning empty ledger to rebuild');
+    return {};
+  } catch (error) {
+    Logger.log('Error decoding ledger: ' + error.message);
+    return {};
+  }
+}
+
+/**
+ * Rebuild ledger from existing sheet data
+ */
+function rebuildLedgerFromSheet(sheet) {
+  try {
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return {};
+    
+    const ledger = {};
+    const data = sheet.getRange(2, 1, lastRow - 1, 50).getValues();
+    
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const gameId = row[0]; // Game ID column
+      const timeClass = row[1]; // Time Class column
+      const myRating = row[28]; // Rating Before column
+      
+      if (gameId && timeClass && myRating) {
+        const key = `${gameId}_${timeClass}`;
+        ledger[key] = {
+          myRating: myRating,
+          timestamp: new Date().getTime()
+        };
+      }
+    }
+    
+    Logger.log(`Rebuilt ledger with ${Object.keys(ledger).length} entries`);
+    return ledger;
+  } catch (error) {
+    Logger.log('Error rebuilding ledger: ' + error.message);
     return {};
   }
 }
