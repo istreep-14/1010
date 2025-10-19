@@ -31,6 +31,7 @@ function onOpen() {
       .addItem('Enrich All Games', 'enrichAllPendingCallbacks')
       .addSeparator()
       .addItem('View Stored Data', 'viewStoredData')
+      .addItem('Clear Duplicate Data', 'clearDuplicateData')
       .addItem('Export All Data', 'exportAllData'))
     .addSeparator()
     .addSubMenu(SpreadsheetApp.getUi().createMenu('📚 Openings')
@@ -137,8 +138,13 @@ function fetchGamesFromArchives(archiveUrls) {
       const response = UrlFetchApp.fetch(url);
       const data = JSON.parse(response.getContentText());
       if (data.games) {
-        // Skip individual game PGN fetching for speed
-        // PGN can be fetched later if needed via callbacks
+        // Store PGN data for each game (from archive data)
+        for (const game of data.games) {
+          if (game.pgn) {
+            const gameId = game.url.split('/').pop();
+            storeGamePGN(gameId, game.pgn);
+          }
+        }
         
         allGames.push(...data.games);
         
@@ -2208,7 +2214,7 @@ function viewStoredData() {
   const callbackData = getAllCallbackData();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const pgnSheet = ss.getSheetByName('PGN Data');
-  const pgnCount = pgnSheet ? pgnSheet.getLastRow() - 1 : 0;
+  const pgnCount = pgnSheet && pgnSheet.getLastRow() > 1 ? pgnSheet.getLastRow() - 1 : 0;
   
   // Get Drive folder info
   let driveInfo = 'Drive folder not accessible';
@@ -2617,5 +2623,42 @@ function testCallbackFetch() {
       'Check View > Logs for error details.',
       SpreadsheetApp.getUi().ButtonSet.OK
     );
+  }
+}
+
+function clearDuplicateData() {
+  try {
+    // Clear PropertiesService
+    PropertiesService.getScriptProperties().deleteProperty('GAME_LEDGER');
+    PropertiesService.getScriptProperties().deleteProperty('LAST_SEEN_URL');
+    
+    // Clear Drive files
+    const folder = getOrCreateDataFolder();
+    const files = folder.getFiles();
+    while (files.hasNext()) {
+      const file = files.next();
+      if (file.getName().includes('all_callbacks') || file.getName().includes('all_pgns')) {
+        file.setTrashed(true);
+      }
+    }
+    
+    // Clear Sheets
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const callbackSheet = ss.getSheetByName('Callback Data');
+    const pgnSheet = ss.getSheetByName('PGN Data');
+    
+    if (callbackSheet) {
+      callbackSheet.clear();
+      callbackSheet.getRange(1, 1, 1, 3).setValues([['Game ID', 'Timestamp', 'Callback Data']]);
+    }
+    
+    if (pgnSheet) {
+      pgnSheet.clear();
+      pgnSheet.getRange(1, 1, 1, 3).setValues([['Game ID', 'Timestamp', 'PGN']]);
+    }
+    
+    SpreadsheetApp.getUi().alert('✅ Cleared all duplicate data!\n\n• PropertiesService cleared\n• Drive files deleted\n• Sheets cleared\n\nReady for fresh data!');
+  } catch (error) {
+    SpreadsheetApp.getUi().alert(`❌ Error clearing data: ${error.message}`);
   }
 }
