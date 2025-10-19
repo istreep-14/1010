@@ -2,7 +2,7 @@
 // Uses Properties Service - no hardcoded spreadsheet IDs
 
 const CONFIG = {
-  USERNAME: 'frankscobey',
+  USERNAME: 'ians141',
   MONTHS_TO_FETCH: 2, // 0 = all history
   CALLBACK_BATCH_SIZE: 11,
   DUPLICATE_CHECK_ROWS: 200
@@ -69,20 +69,12 @@ function getArchivesSheet() {
   return getControlSpreadsheet().getSheetByName('Archives');
 }
 
-function getRegistrySheet() {
-  return getControlSpreadsheet().getSheetByName('Registry');
-}
-
 function getCallbackSheet() {
   return getEnrichmentSpreadsheet().getSheetByName('Callback Data');
 }
 
 function getLichessSheet() {
   return getEnrichmentSpreadsheet().getSheetByName('Lichess Analysis');
-}
-
-function getSummarySheet() {
-  return getMainSpreadsheet().getSheetByName('Summary');
 }
 
 // ===== RESET ALL (FOR CLEAN START) =====
