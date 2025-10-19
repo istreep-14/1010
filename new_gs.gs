@@ -38,6 +38,11 @@ function onOpen() {
       .addItem('Test Database Connection', 'testOpeningsDbConnection')
       .addItem('Refresh Opening Data', 'refreshOpeningDataFromExternalDb'))
     .addSeparator()
+    .addSubMenu(SpreadsheetApp.getUi().createMenu('🔧 Dev Mode')
+      .addItem('Store Monthly Archives as JSON', 'storeMonthlyArchivesAsJSON')
+      .addItem('Fetch from Stored JSON', 'fetchFromStoredJSON')
+      .addItem('Clear Stored Archives', 'clearStoredArchives'))
+    .addSeparator()
     .addItem('📊 Update Summary Stats', 'updateSummaryStats')
     .addToUi();
 }
@@ -138,14 +143,7 @@ function fetchGamesFromArchives(archiveUrls) {
       const response = UrlFetchApp.fetch(url);
       const data = JSON.parse(response.getContentText());
       if (data.games) {
-        // Store PGN data for each game (from archive data)
-        for (const game of data.games) {
-          if (game.pgn) {
-            const gameId = game.url.split('/').pop();
-            storeGamePGN(gameId, game.pgn);
-          }
-        }
-        
+        // Skip PGN storage for speed
         allGames.push(...data.games);
         
         // Update last seen URL
@@ -2377,6 +2375,7 @@ function fetchCallbackData(game) {
       baseTime: gameData.baseTime1 || 0,
       timeIncrement: gameData.timeIncrement1 || 0,
       moveTimestamps: gameData.moveTimestamps ? String(gameData.moveTimestamps) : '',
+      moveList: gameData.moveList || '',
       myUsername: myPlayer.username || '',
       myCountry: myPlayer.countryName || '',
       myMembership: myPlayer.membershipCode || '',
