@@ -1,4 +1,6 @@
 // ===== EXPANDED GAME FETCHING WITH ALL DATA =====
+// COMPLETE fetch.gs WITH ALL FIXES APPLIED
+// NOTE: ImprovedRatingsTracker class is defined in callback.gs
 
 function fetchChesscomGames(options = {}) {
   const { monthsToFetch = CONFIG.MONTHS_TO_FETCH, specificArchive = null } = options;
@@ -36,9 +38,11 @@ function fetchChesscomGames(options = {}) {
     
     ss.toast(`Processing ${newGames.length} new games...`, '⏳', -1);
     
-    // Initialize ratings tracker
+    // FIX: Initialize ratings tracker and load from existing games FIRST
     const ratingsTracker = new ImprovedRatingsTracker();
     ratingsTracker.loadFromGamesSheet();
+    
+    Logger.log('Ratings ledger loaded: ' + JSON.stringify(ratingsTracker.ledger));
     
     // Process and write games
     const gamesRows = processExpandedGames(newGames, ratingsTracker);
@@ -132,9 +136,11 @@ function processExpandedGames(games, ratingsTracker) {
       const endDate = new Date(game.end_time * 1000);
       const archive = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}`;
       
-      // Extract start time and duration from PGN
-      const startDate = extractStartFromPGN(game.pgn);
+      // FIX: Extract duration first, then calculate start time from end - duration
       const duration = extractDurationFromPGN(game.pgn);
+      
+      // Calculate start time from end time minus duration (MUCH MORE RELIABLE)
+      const startDate = calculateStartFromEnd(endDate, duration);
       
       // Determine player info
       const isWhite = game.white?.username.toLowerCase() === CONFIG.USERNAME.toLowerCase();
@@ -158,6 +164,8 @@ function processExpandedGames(games, ratingsTracker) {
       
       // Get outcome
       const outcome = getGameOutcome(game, CONFIG.USERNAME).toLowerCase();
+      
+      // FIX: Get proper termination (uses opponent's result when you win)
       const termination = getGameTermination(game, CONFIG.USERNAME).toLowerCase();
       
       // Extract opening details
@@ -176,7 +184,7 @@ function processExpandedGames(games, ratingsTracker) {
         game.url,
         game.pgn || '',
         
-        // Dates & Times
+        // Dates & Times - FIX: Start date calculated from end - duration
         startDate ? formatDateTime(startDate) : null,
         startDate ? formatDate(startDate) : null,
         startDate ? formatTime(startDate) : null,
@@ -209,7 +217,7 @@ function processExpandedGames(games, ratingsTracker) {
         ratings.before,
         ratings.delta,
         
-        // Result
+        // Result - FIX: Termination uses opponent's result when you win
         outcome,
         termination,
         
@@ -232,9 +240,6 @@ function processExpandedGames(games, ratingsTracker) {
         now,   // Fetch date
         now    // Last updated
       ]);
-      
-      // Add to registry
-      addToRegistry(gameId, archive, format);
       
     } catch (error) {
       Logger.log(`Error processing game ${game?.url}: ${error.message}`);
