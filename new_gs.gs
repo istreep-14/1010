@@ -188,15 +188,24 @@ function getLastLedger(sheet) {
   try {
     // Column AW is now column 49 (after removing Link column)
     const lastLedgerCell = sheet.getRange(sheet.getLastRow(), 49).getValue();
-    if (!lastLedgerCell || lastLedgerCell === '') {
+    if (!lastLedgerCell || lastLedgerCell === '' || typeof lastLedgerCell !== 'string') {
       Logger.log('No ledger found in last row, returning empty ledger');
       return {};
     }
-    const ledger = JSON.parse(lastLedgerCell);
+    
+    // Clean the cell value before parsing
+    const cleanLedgerData = lastLedgerCell.trim();
+    if (cleanLedgerData === '') {
+      Logger.log('Empty ledger data, returning empty ledger');
+      return {};
+    }
+    
+    const ledger = JSON.parse(cleanLedgerData);
     Logger.log('Loaded ledger from last row: ' + JSON.stringify(ledger));
     return ledger;
   } catch (e) {
     Logger.log('Could not parse ledger: ' + e.message);
+    Logger.log('Ledger cell content: ' + JSON.stringify(sheet.getRange(sheet.getLastRow(), 49).getValue()));
     return {};
   }
 }
