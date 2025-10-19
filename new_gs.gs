@@ -924,21 +924,95 @@ function getOpeningDataForGame(ecoUrl) {
   const empty = ['', '', '', '', '', '', '', '', '', '', ''];
   if (!ecoUrl) return empty;
   
-  // Step 1: Split URL into base slug + extra moves
-  const { baseSlug, extraMoves } = splitEcoUrl(ecoUrl);
-  if (!baseSlug) return empty;
+  try {
+    // Step 1: Split URL into base slug + extra moves
+    const { baseSlug, extraMoves } = splitEcoUrl(ecoUrl);
+    if (!baseSlug) return empty;
+    
+    // Step 2: Load database (cached)
+    const db = loadOpeningsDb();
+    
+    // Step 3: Lookup in database
+    const dbRow = lookupInDb(db, baseSlug);
+    
+    // Step 4: Format extra moves from slug to PGN notation
+    const formattedExtraMoves = formatExtraMovesV2(extraMoves);
+    
+    // Step 5: Return all fields + formatted extra moves
+    return [...dbRow, formattedExtraMoves];
+    
+  } catch (error) {
+    Logger.log(`Error in getOpeningDataForGame: ${error.message}`);
+    // Fallback to simple extraction
+    return getOpeningDataFallback(ecoUrl);
+  }
+}
+
+/**
+ * Fallback opening data extraction when database is not available
+ */
+function getOpeningDataFallback(ecoUrl) {
+  if (!ecoUrl) return ['', '', '', '', '', '', '', '', '', '', ''];
   
-  // Step 2: Load database (cached)
-  const db = loadOpeningsDb();
-  
-  // Step 3: Lookup in database
-  const dbRow = lookupInDb(db, baseSlug);
-  
-  // Step 4: Format extra moves from slug to PGN notation
-  const formattedExtraMoves = formatExtraMovesV2(extraMoves);
-  
-  // Step 5: Return all fields + formatted extra moves
-  return [...dbRow, formattedExtraMoves];
+  try {
+    // Extract opening name from URL
+    const match = ecoUrl.match(/\/openings\/([^"]+)$/);
+    if (!match) return ['', '', '', '', '', '', '', '', '', '', ''];
+    
+    const slug = match[1];
+    const openingName = slug
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+    
+    // Extract family from opening name (first major part)
+    let openingFamily = '';
+    if (openingName) {
+      const familyParts = openingName.split(' ');
+      if (familyParts.length >= 2) {
+        // Take first 2-3 words as family (e.g., "Sicilian Defense", "King's Indian")
+        openingFamily = familyParts.slice(0, Math.min(3, familyParts.length)).join(' ');
+      } else {
+        openingFamily = openingName;
+      }
+    }
+    
+    // Extract extra moves from URL - improved logic
+    let extraMoves = '';
+    if (slug && slug.includes('-')) {
+      const parts = slug.split('-');
+      if (parts.length > 2) {
+        // Skip first 2 parts (opening name) and get the rest as extra moves
+        const extraParts = parts.slice(2);
+        extraMoves = extraParts
+          .map(move => {
+            // Convert chess notation (e.g., "nxd4" -> "Nxd4", "o-o" -> "O-O")
+            if (move === 'o-o') return 'O-O';
+            if (move === 'o-o-o') return 'O-O-O';
+            return move.charAt(0).toUpperCase() + move.slice(1);
+          })
+          .join(' ');
+      }
+    }
+    
+    return [
+      openingName,     // Opening Name
+      slug,            // Opening Slug
+      openingFamily,   // Opening Family
+      openingName,     // Opening Base (same as name for now)
+      '',              // Variation 1
+      '',              // Variation 2
+      '',              // Variation 3
+      '',              // Variation 4
+      '',              // Variation 5
+      '',              // Variation 6
+      extraMoves       // Extra Moves
+    ];
+    
+  } catch (error) {
+    Logger.log(`Error in fallback opening extraction: ${error.message}`);
+    return ['', '', '', '', '', '', '', '', '', '', ''];
+  }
 }
 
 // ================================
@@ -1008,11 +1082,12 @@ function loadOpeningsDb() {
   const cache = new Map();
   
   try {
+    // Try to access external database
     const dbSpreadsheet = SpreadsheetApp.openById(OPENINGS_DB_CONFIG.SPREADSHEET_ID);
     const dbSheet = dbSpreadsheet.getSheetByName(OPENINGS_DB_CONFIG.SHEET_NAME);
     
     if (!dbSheet) {
-      Logger.log('Openings DB sheet not found');
+      Logger.log('Openings DB sheet not found - using fallback');
       OPENINGS_DB_CONFIG.cache = cache;
       OPENINGS_DB_CONFIG.lastCacheTime = now;
       return cache;
@@ -1020,6 +1095,7 @@ function loadOpeningsDb() {
     
     const values = dbSheet.getDataRange().getValues();
     if (values.length < 2) {
+      Logger.log('Openings DB empty - using fallback');
       OPENINGS_DB_CONFIG.cache = cache;
       OPENINGS_DB_CONFIG.lastCacheTime = now;
       return cache;
@@ -1047,10 +1123,11 @@ function loadOpeningsDb() {
     
     OPENINGS_DB_CONFIG.cache = cache;
     OPENINGS_DB_CONFIG.lastCacheTime = now;
-    Logger.log(`Loaded ${cache.size} openings`);
+    Logger.log(`Loaded ${cache.size} openings from external database`);
     
   } catch (error) {
-    Logger.log(`Error loading openings: ${error.message}`);
+    Logger.log(`Error loading external openings database: ${error.message}`);
+    Logger.log('Using fallback opening extraction');
   }
   
   return cache;
@@ -1974,6 +2051,7 @@ function storeCallbackDataInDrive(gameId, callbackData) {
     }
   } catch (error) {
     Logger.log(`Error storing callback data in Drive: ${error.message}`);
+    // Continue without Drive storage - data is still stored in Sheets
   }
 }
 
@@ -2006,6 +2084,7 @@ function storePGNInDrive(gameId, pgn) {
     }
   } catch (error) {
     Logger.log(`Error storing PGN in Drive: ${error.message}`);
+    // Continue without Drive storage - data is still stored in Sheets
   }
 }
 
