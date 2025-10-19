@@ -1686,19 +1686,33 @@ function storePGNInSheet(gameId, pgn) {
   }
 }
 
-// ===== GOOGLE DRIVE STORAGE =====
+// ===== GOOGLE DRIVE STORAGE (BATCHED) =====
 function storeCallbackDataInDrive(gameId, callbackData) {
   try {
     const folder = getOrCreateDataFolder();
-    const fileName = `callback_${gameId}.json`;
-    const files = folder.getFilesByName(fileName);
+    const fileName = 'all_callbacks.json';
+    let allData = {};
     
+    // Try to load existing data
+    const files = folder.getFilesByName(fileName);
     if (files.hasNext()) {
-      // Update existing file
-      files.next().setContent(JSON.stringify(callbackData, null, 2));
+      try {
+        const existingContent = files.next().getBlob().getDataAsString();
+        allData = JSON.parse(existingContent);
+      } catch (error) {
+        Logger.log(`Error parsing existing callback data: ${error.message}`);
+        allData = {};
+      }
+    }
+    
+    // Add new data
+    allData[gameId] = callbackData;
+    
+    // Save back to file
+    if (files.hasNext()) {
+      files.next().setContent(JSON.stringify(allData, null, 2));
     } else {
-      // Create new file
-      folder.createFile(fileName, JSON.stringify(callbackData, null, 2));
+      folder.createFile(fileName, JSON.stringify(allData, null, 2));
     }
   } catch (error) {
     Logger.log(`Error storing callback data in Drive: ${error.message}`);
@@ -1708,15 +1722,29 @@ function storeCallbackDataInDrive(gameId, callbackData) {
 function storePGNInDrive(gameId, pgn) {
   try {
     const folder = getOrCreateDataFolder();
-    const fileName = `pgn_${gameId}.txt`;
-    const files = folder.getFilesByName(fileName);
+    const fileName = 'all_pgns.json';
+    let allData = {};
     
+    // Try to load existing data
+    const files = folder.getFilesByName(fileName);
     if (files.hasNext()) {
-      // Update existing file
-      files.next().setContent(pgn);
+      try {
+        const existingContent = files.next().getBlob().getDataAsString();
+        allData = JSON.parse(existingContent);
+      } catch (error) {
+        Logger.log(`Error parsing existing PGN data: ${error.message}`);
+        allData = {};
+      }
+    }
+    
+    // Add new data
+    allData[gameId] = pgn;
+    
+    // Save back to file
+    if (files.hasNext()) {
+      files.next().setContent(JSON.stringify(allData, null, 2));
     } else {
-      // Create new file
-      folder.createFile(fileName, pgn);
+      folder.createFile(fileName, JSON.stringify(allData, null, 2));
     }
   } catch (error) {
     Logger.log(`Error storing PGN in Drive: ${error.message}`);
@@ -1749,12 +1777,13 @@ function getCallbackData(gameId) {
     }
   }
   
-  // Fallback to Drive
+  // Fallback to Drive (batched file)
   try {
     const folder = getOrCreateDataFolder();
-    const files = folder.getFilesByName(`callback_${gameId}.json`);
+    const files = folder.getFilesByName('all_callbacks.json');
     if (files.hasNext()) {
-      return JSON.parse(files.next().getBlob().getDataAsString());
+      const allData = JSON.parse(files.next().getBlob().getDataAsString());
+      return allData[gameId] || null;
     }
   } catch (error) {
     Logger.log(`Error getting callback data: ${error.message}`);
@@ -1777,12 +1806,13 @@ function getGamePGN(gameId) {
     }
   }
   
-  // Fallback to Drive
+  // Fallback to Drive (batched file)
   try {
     const folder = getOrCreateDataFolder();
-    const files = folder.getFilesByName(`pgn_${gameId}.txt`);
+    const files = folder.getFilesByName('all_pgns.json');
     if (files.hasNext()) {
-      return files.next().getBlob().getDataAsString();
+      const allData = JSON.parse(files.next().getBlob().getDataAsString());
+      return allData[gameId] || null;
     }
   } catch (error) {
     Logger.log(`Error getting PGN: ${error.message}`);
@@ -1830,7 +1860,7 @@ function viewStoredData() {
       files.next();
       fileCount++;
     }
-    driveInfo = `Drive folder: ${fileCount} files`;
+    driveInfo = `Drive folder: ${fileCount} files (all_callbacks.json, all_pgns.json)`;
   } catch (error) {
     driveInfo = `Drive error: ${error.message}`;
   }
@@ -1845,8 +1875,8 @@ function viewStoredData() {
     `• ${driveInfo}\n\n` +
     `📁 Storage Locations:\n` +
     `• Sheets: "Callback Data" and "PGN Data" tabs\n` +
-    `• Drive: "Chess Data Storage" folder\n\n` +
-    `To view data: Run "Export All Data" or check the sheets directly`,
+    `• Drive: "Chess Data Storage" folder (2 files total)\n\n` +
+    `✅ Efficient: Only 2 files in Drive regardless of game count!`,
     ui.ButtonSet.OK
   );
 }
