@@ -334,7 +334,7 @@ function processGames(games, username, ratingsLedger = {}) {
         oppRating,                 // AB: Opp Rating
         ratingBefore,              // AC: Rating Before
         ratingDelta,               // AD: Rating Δ
-        'pending',                 // AE: Callback Status
+        'pending',                 // AE: Callback Status (will be updated by callback enrichment)
         outcome,                   // AF: Outcome
         termination,               // AG: Termination
         ecoCode,                   // AH: ECO
@@ -921,21 +921,21 @@ function getOpeningDataForGame(ecoUrl) {
     }
   }
   
-  // Extract extra moves from URL (everything after the main opening name)
+  // Extract extra moves from URL - improved logic
   let extraMoves = '';
-  const urlParts = ecoUrl.split('/');
-  if (urlParts.length > 0) {
-    const lastPart = urlParts[urlParts.length - 1];
-    const openingIndex = lastPart.indexOf(openingName.toLowerCase().replace(/\s+/g, '-'));
-    if (openingIndex > 0) {
-      extraMoves = lastPart.substring(openingIndex + openingName.toLowerCase().replace(/\s+/g, '-').length);
-      if (extraMoves.startsWith('-')) {
-        extraMoves = extraMoves.substring(1);
-      }
-      // Convert back to move notation (e.g., "nxd4" -> "Nxd4")
-      extraMoves = extraMoves.split('-').map(move => 
-        move.charAt(0).toUpperCase() + move.slice(1)
-      ).join(' ');
+  if (slug && slug.includes('-')) {
+    const parts = slug.split('-');
+    if (parts.length > 2) {
+      // Skip first 2 parts (opening name) and get the rest as extra moves
+      const extraParts = parts.slice(2);
+      extraMoves = extraParts
+        .map(move => {
+          // Convert chess notation (e.g., "nxd4" -> "Nxd4", "o-o" -> "O-O")
+          if (move === 'o-o') return 'O-O';
+          if (move === 'o-o-o') return 'O-O-O';
+          return move.charAt(0).toUpperCase() + move.slice(1);
+        })
+        .join(' ');
     }
   }
   
@@ -1448,18 +1448,31 @@ function enrichNewGamesWithCallbacks(count = 20) {
         const isDifferent = (callbackRatingBefore !== currentRatingBefore) || (callbackRatingChange !== currentRatingDelta);
         const isNonZero = callbackRatingChange !== 0;
         
+        const actualRow = startRow + i;
+        let status = 'fetched'; // Default status when data is fetched
+        
         if (isDifferent && isNonZero) {
           // Override with callback data
-          const actualRow = startRow + i;
           gamesSheet.getRange(actualRow, 29).setValue(callbackRatingBefore); // Rating Before
           gamesSheet.getRange(actualRow, 30).setValue(callbackRatingChange); // Rating Delta
-          gamesSheet.getRange(actualRow, 31).setValue('callback_override'); // Mark as overridden
-          
+          status = 'callback_override';
           overrideCount++;
-          Logger.log(`Overrode ratings for game ${gameId}: ${currentRatingBefore}→${callbackRatingBefore}, ${currentRatingDelta}→${callbackRatingChange}`);
+          Logger.log(`✅ OVERRIDE: Game ${gameId} - Ratings changed from ${currentRatingBefore}→${callbackRatingBefore}, ${currentRatingDelta}→${callbackRatingChange}`);
+        } else if (isDifferent && !isNonZero) {
+          status = 'fetched_zero';
+          Logger.log(`ℹ️ SAME ZERO: Game ${gameId} - Callback data same as sheet (both zero rating change)`);
+        } else {
+          Logger.log(`ℹ️ SAME DATA: Game ${gameId} - Callback data matches sheet data`);
         }
         
+        // Always update status to remove "pending"
+        gamesSheet.getRange(actualRow, 31).setValue(status);
         successCount++;
+      } else {
+        // No callback data available - mark as failed
+        const actualRow = startRow + i;
+        gamesSheet.getRange(actualRow, 31).setValue('no_data');
+        Logger.log(`❌ NO DATA: Game ${gameId} - No callback data available`);
       }
       
       // Rate limiting
@@ -2084,7 +2097,7 @@ function updatePendingCallbacks() {
   }
   
   // Find all rows with "pending" status
-  const statusColumn = 31; // AF column
+  const statusColumn = 31; // AE column
   const statusRange = gamesSheet.getRange(2, statusColumn, lastRow - 1, 1);
   const statusValues = statusRange.getValues();
   
@@ -2129,13 +2142,8 @@ function updatePendingCallbacks() {
         const callbackRatingBefore = callbackData.myRatingBefore;
         const callbackRatingChange = callbackData.myRatingChange;
         
-        // Log comprehensive callback data
-        logCallbackData(gameId, callbackData, {
-          currentRatingBefore,
-          currentRatingDelta,
-          gameUrl,
-          timeClass
-        });
+        // Store comprehensive callback data
+        storeCallbackData(gameId, callbackData);
         
         // Check if callback data is non-zero and different from current data
         const isDifferent = (callbackRatingBefore !== currentRatingBefore) || (callbackRatingChange !== currentRatingDelta);
