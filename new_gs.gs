@@ -1396,44 +1396,25 @@ function enrichNewGamesWithCallbacks(count = 20) {
         const callbackRatingBefore = callbackData.myRatingBefore;
         const callbackRatingChange = callbackData.myRatingChange;
         
-        // Log comprehensive callback data
-        logCallbackData(gameId, callbackData, {
-          currentRatingBefore,
-          currentRatingDelta,
-          gameUrl,
-          timeClass
-        });
+        // Store comprehensive callback data
+        storeCallbackData(gameId, callbackData);
         
         // Check if callback data is non-zero and different from current data
         const isDifferent = (callbackRatingBefore !== currentRatingBefore) || (callbackRatingChange !== currentRatingDelta);
         const isNonZero = callbackRatingChange !== 0;
         
-        const actualRow = startRow + i;
-        let status = 'fetched'; // Default status when data is fetched
-        
         if (isDifferent && isNonZero) {
           // Override with callback data
+          const actualRow = startRow + i;
           gamesSheet.getRange(actualRow, 29).setValue(callbackRatingBefore); // Rating Before
           gamesSheet.getRange(actualRow, 30).setValue(callbackRatingChange); // Rating Delta
-          status = 'callback_override';
-          overrideCount++;
+          gamesSheet.getRange(actualRow, 31).setValue('callback_override'); // Mark as overridden
           
-          Logger.log(`✅ OVERRIDE: Game ${gameId} - Ratings changed from ${currentRatingBefore}→${callbackRatingBefore}, ${currentRatingDelta}→${callbackRatingChange}`);
-        } else if (isDifferent && !isNonZero) {
-          status = 'fetched_zero';
-          Logger.log(`ℹ️ SAME ZERO: Game ${gameId} - Callback data same as sheet (both zero rating change)`);
-        } else {
-          Logger.log(`ℹ️ SAME DATA: Game ${gameId} - Callback data matches sheet data`);
+          overrideCount++;
+          Logger.log(`Overrode ratings for game ${gameId}: ${currentRatingBefore}→${callbackRatingBefore}, ${currentRatingDelta}→${callbackRatingChange}`);
         }
         
-        // Update status regardless of whether we overrode
-        gamesSheet.getRange(actualRow, 31).setValue(status);
         successCount++;
-      } else {
-        // No callback data available - mark as failed
-        const actualRow = startRow + i;
-        gamesSheet.getRange(actualRow, 31).setValue('no_data');
-        Logger.log(`❌ NO DATA: Game ${gameId} - No callback data available`);
       }
       
       // Rate limiting
