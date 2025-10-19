@@ -2561,7 +2561,7 @@ function clearDuplicateData() {
       callbackSheet.getRange(1, 1, 1, 3).setValues([['Game ID', 'Timestamp', 'Callback Data']]);
     }
     
-    SpreadsheetApp.getUi().alert('✅ Cleared all duplicate data!\n\n• PropertiesService cleared\n• Drive files deleted\n• Sheets cleared\n\nReady for fresh data!');
+    SpreadsheetApp.getUi().alert('✅ Cleared all duplicate data!\n\n• PropertiesService cleared\n• Sheets cleared\n\nReady for fresh data!');
   } catch (error) {
     SpreadsheetApp.getUi().alert(`❌ Error clearing data: ${error.message}`);
   }
