@@ -348,9 +348,8 @@ function processGames(games, username, ratingsLedger = {}) {
         openingData[9],            // AS: Variation 6
         openingData[10],           // AT: Extra Moves
         movesCount,                // AU: Moves
-        '',                        // AV: TCN (removed for speed)
-        '',                        // AW: Clocks (removed for speed)
-        JSON.stringify(currentLedger) // AX: Ratings Ledger
+        '',                        // AV: moveList (will be filled by callbacks)
+        JSON.stringify(currentLedger) // AW: Ratings Ledger
       ]);
       
     } catch (error) {
@@ -384,7 +383,7 @@ function setupSheets() {
     'Opening Name', 'Opening Slug', 'Opening Family', 'Opening Base',
     'Variation 1', 'Variation 2', 'Variation 3', 'Variation 4', 'Variation 5', 'Variation 6',
     'Extra Moves',
-    'Moves', 'TCN', 'Clocks', 'Ratings Ledger'
+    'Moves', 'moveList', 'Ratings Ledger'
   ];
   
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -1804,6 +1803,7 @@ function enrichNewGamesWithCallbacks(count = 20) {
           // Override with callback data
           gamesSheet.getRange(actualRow, 29).setValue(callbackRatingBefore); // Rating Before
           gamesSheet.getRange(actualRow, 30).setValue(callbackRatingChange); // Rating Delta
+          gamesSheet.getRange(actualRow, 32).setValue(callbackData.moveList || ''); // moveList
           status = 'callback_override';
           overrideCount++;
           Logger.log(`✅ OVERRIDE: Game ${gameId} - Ratings changed from ${currentRatingBefore}→${callbackRatingBefore}, ${currentRatingDelta}→${callbackRatingChange}`);
@@ -1814,7 +1814,8 @@ function enrichNewGamesWithCallbacks(count = 20) {
           Logger.log(`ℹ️ SAME DATA: Game ${gameId} - Callback data matches sheet data`);
         }
         
-        // Always update status to remove "pending"
+        // Always update moveList and status
+        gamesSheet.getRange(actualRow, 32).setValue(callbackData.moveList || ''); // moveList
         gamesSheet.getRange(actualRow, 31).setValue(status);
         successCount++;
       } else {
@@ -1864,11 +1865,8 @@ function enrichNewGamesWithCallbacks(count = 20) {
 
 // ===== CALLBACK DATA STORAGE =====
 function storeCallbackData(gameId, callbackData) {
-  // Store in Google Sheets
+  // Store in Google Sheets only
   storeCallbackDataInSheet(gameId, callbackData);
-  
-  // Store in Google Drive as JSON file
-  storeCallbackDataInDrive(gameId, callbackData);
   
   // Log summary
   const summary = `Game ${gameId}: My ${callbackData.myRatingBefore}→${callbackData.myRating} (${callbackData.myRatingChange > 0 ? '+' : ''}${callbackData.myRatingChange}), ` +
@@ -2053,71 +2051,9 @@ function storePGNInSheet(gameId, pgn) {
 }
 
 // ===== GOOGLE DRIVE STORAGE (BATCHED) =====
-function storeCallbackDataInDrive(gameId, callbackData) {
-  try {
-    const folder = getOrCreateDataFolder();
-    const fileName = 'all_callbacks.json';
-    let allData = {};
-    
-    // Try to load existing data
-    const files = folder.getFilesByName(fileName);
-    if (files.hasNext()) {
-      try {
-        const existingContent = files.next().getBlob().getDataAsString();
-        allData = JSON.parse(existingContent);
-      } catch (error) {
-        Logger.log(`Error parsing existing callback data: ${error.message}`);
-        allData = {};
-      }
-    }
-    
-    // Add new data
-    allData[gameId] = callbackData;
-    
-    // Save back to file
-    if (files.hasNext()) {
-      files.next().setContent(JSON.stringify(allData, null, 2));
-    } else {
-      folder.createFile(fileName, JSON.stringify(allData, null, 2));
-    }
-  } catch (error) {
-    Logger.log(`Error storing callback data in Drive: ${error.message}`);
-    // Continue without Drive storage - data is still stored in Sheets
-  }
-}
+// Drive storage removed - only using Sheets now
 
-function storePGNInDrive(gameId, pgn) {
-  try {
-    const folder = getOrCreateDataFolder();
-    const fileName = 'all_pgns.json';
-    let allData = {};
-    
-    // Try to load existing data
-    const files = folder.getFilesByName(fileName);
-    if (files.hasNext()) {
-      try {
-        const existingContent = files.next().getBlob().getDataAsString();
-        allData = JSON.parse(existingContent);
-      } catch (error) {
-        Logger.log(`Error parsing existing PGN data: ${error.message}`);
-        allData = {};
-      }
-    }
-    
-    // Add new data
-    allData[gameId] = pgn;
-    
-    // Save back to file
-    if (files.hasNext()) {
-      files.next().setContent(JSON.stringify(allData, null, 2));
-    } else {
-      folder.createFile(fileName, JSON.stringify(allData, null, 2));
-    }
-  } catch (error) {
-    Logger.log(`Error storing PGN in Drive: ${error.message}`);
-    // Continue without Drive storage - data is still stored in Sheets
-  }
-}
+// Drive storage removed - only using Sheets now
 
 function getOrCreateDataFolder() {
   const folderName = 'Chess Data Storage';
@@ -2215,36 +2151,17 @@ function getAllCallbackData() {
 function viewStoredData() {
   const callbackData = getAllCallbackData();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const pgnSheet = ss.getSheetByName('PGN Data');
-  const pgnCount = pgnSheet && pgnSheet.getLastRow() > 1 ? pgnSheet.getLastRow() - 1 : 0;
-  
-  // Get Drive folder info
-  let driveInfo = 'Drive folder not accessible';
-  try {
-    const folder = getOrCreateDataFolder();
-    const files = folder.getFiles();
-    let fileCount = 0;
-    while (files.hasNext()) {
-      files.next();
-      fileCount++;
-    }
-    driveInfo = `Drive folder: ${fileCount} files (all_callbacks.json, all_pgns.json)`;
-  } catch (error) {
-    driveInfo = `Drive error: ${error.message}`;
-  }
+  const callbackSheet = ss.getSheetByName('Callback Data');
+  const callbackCount = callbackSheet && callbackSheet.getLastRow() > 1 ? callbackSheet.getLastRow() - 1 : 0;
   
   const ui = SpreadsheetApp.getUi();
   ui.alert(
     'Stored Data Summary',
     `📊 Google Sheets:\n` +
-    `• Callback Data: ${Object.keys(callbackData).length} games\n` +
-    `• PGN Data: ${pgnCount} games\n\n` +
-    `☁️ Google Drive:\n` +
-    `• ${driveInfo}\n\n` +
-    `📁 Storage Locations:\n` +
-    `• Sheets: "Callback Data" and "PGN Data" tabs\n` +
-    `• Drive: "Chess Data Storage" folder (2 files total)\n\n` +
-    `✅ Efficient: Only 2 files in Drive regardless of game count!`,
+    `• Callback Data: ${callbackCount} games\n\n` +
+    `📁 Storage Location:\n` +
+    `• Sheets: "Callback Data" tab only\n\n` +
+    `✅ Simplified: Only Sheets storage, no JSON files!`,
     ui.ButtonSet.OK
   );
 }
@@ -2635,29 +2552,13 @@ function clearDuplicateData() {
     PropertiesService.getScriptProperties().deleteProperty('GAME_LEDGER');
     PropertiesService.getScriptProperties().deleteProperty('LAST_SEEN_URL');
     
-    // Clear Drive files
-    const folder = getOrCreateDataFolder();
-    const files = folder.getFiles();
-    while (files.hasNext()) {
-      const file = files.next();
-      if (file.getName().includes('all_callbacks') || file.getName().includes('all_pgns')) {
-        file.setTrashed(true);
-      }
-    }
-    
-    // Clear Sheets
+    // Clear Sheets only
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const callbackSheet = ss.getSheetByName('Callback Data');
-    const pgnSheet = ss.getSheetByName('PGN Data');
     
     if (callbackSheet) {
       callbackSheet.clear();
       callbackSheet.getRange(1, 1, 1, 3).setValues([['Game ID', 'Timestamp', 'Callback Data']]);
-    }
-    
-    if (pgnSheet) {
-      pgnSheet.clear();
-      pgnSheet.getRange(1, 1, 1, 3).setValues([['Game ID', 'Timestamp', 'PGN']]);
     }
     
     SpreadsheetApp.getUi().alert('✅ Cleared all duplicate data!\n\n• PropertiesService cleared\n• Drive files deleted\n• Sheets cleared\n\nReady for fresh data!');
