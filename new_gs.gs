@@ -894,6 +894,24 @@ function getOpeningDataForGame(ecoUrl) {
     }
   }
   
+  // Extract extra moves from URL (everything after the main opening name)
+  let extraMoves = '';
+  const urlParts = ecoUrl.split('/');
+  if (urlParts.length > 0) {
+    const lastPart = urlParts[urlParts.length - 1];
+    const openingIndex = lastPart.indexOf(openingName.toLowerCase().replace(/\s+/g, '-'));
+    if (openingIndex > 0) {
+      extraMoves = lastPart.substring(openingIndex + openingName.toLowerCase().replace(/\s+/g, '-').length);
+      if (extraMoves.startsWith('-')) {
+        extraMoves = extraMoves.substring(1);
+      }
+      // Convert back to move notation (e.g., "nxd4" -> "Nxd4")
+      extraMoves = extraMoves.split('-').map(move => 
+        move.charAt(0).toUpperCase() + move.slice(1)
+      ).join(' ');
+    }
+  }
+  
   return [
     openingName,     // Opening Name
     slug,            // Opening Slug
@@ -905,7 +923,7 @@ function getOpeningDataForGame(ecoUrl) {
     '',              // Variation 4
     '',              // Variation 5
     '',              // Variation 6
-    ''               // Extra Moves
+    extraMoves       // Extra Moves
   ];
 }
 
