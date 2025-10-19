@@ -21,6 +21,11 @@ function onOpen() {
     .addItem('🔄 Update Games', 'fetchChesscomGames')
     .addItem('📥 Fetch All History', 'fetchAllGames')
     .addSeparator()
+    .addSubMenu(SpreadsheetApp.getUi().createMenu('⭐ Callbacks')
+      .addItem('Test Callback Fetch', 'testCallbackFetch')
+      .addItem('Enrich Recent Games (20)', 'enrichNewGamesWithCallbacks')
+      .addItem('Enrich All Games', 'enrichAllPendingCallbacks'))
+    .addSeparator()
     .addItem('📊 Update Summary Stats', 'updateSummaryStats')
     .addToUi();
 }
@@ -167,6 +172,11 @@ function writeGamesToSheet(sheet, rows) {
   
   const startRow = sheet.getLastRow() + 1;
   sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+  
+  // After writing, check for callback data to override ratings
+  setTimeout(() => {
+    enrichNewGamesWithCallbacks(rows.length);
+  }, 1000);
 }
 
 // ===== GAME PROCESSING (OPTIMIZED FROM OLD.GS) =====
@@ -289,25 +299,26 @@ function processGames(games, username, ratingsLedger = {}) {
         oppRating,                 // AB: Opp Rating
         ratingBefore,              // AC: Rating Before
         ratingDelta,               // AD: Rating Δ
-        outcome,                   // AE: Outcome
-        termination,               // AF: Termination
-        ecoCode,                   // AG: ECO
-        ecoUrl,                    // AH: ECO URL
-        openingData[0],            // AI: Opening Name
-        openingData[1],            // AJ: Opening Slug
-        openingData[2],            // AK: Opening Family
-        openingData[3],            // AL: Opening Base
-        openingData[4],            // AM: Variation 1
-        openingData[5],            // AN: Variation 2
-        openingData[6],            // AO: Variation 3
-        openingData[7],            // AP: Variation 4
-        openingData[8],            // AQ: Variation 5
-        openingData[9],            // AR: Variation 6
-        openingData[10],           // AS: Extra Moves
-        movesCount,                // AT: Moves
-        tcn,                       // AU: TCN
-        clocks,                    // AV: Clocks
-        ledgerString               // AW: Ratings Ledger
+        'pending',                 // AE: Callback Status
+        outcome,                   // AF: Outcome
+        termination,               // AG: Termination
+        ecoCode,                   // AH: ECO
+        ecoUrl,                    // AI: ECO URL
+        openingData[0],            // AJ: Opening Name
+        openingData[1],            // AK: Opening Slug
+        openingData[2],            // AL: Opening Family
+        openingData[3],            // AM: Opening Base
+        openingData[4],            // AN: Variation 1
+        openingData[5],            // AO: Variation 2
+        openingData[6],            // AP: Variation 3
+        openingData[7],            // AQ: Variation 4
+        openingData[8],            // AR: Variation 5
+        openingData[9],            // AS: Variation 6
+        openingData[10],           // AT: Extra Moves
+        movesCount,                // AU: Moves
+        tcn,                       // AV: TCN
+        clocks,                    // AW: Clocks
+        ledgerString               // AX: Ratings Ledger
       ]);
       
     } catch (error) {
@@ -335,7 +346,7 @@ function setupSheets() {
     'Start Date/Time', 'Start Date', 'Start Time', 'Start (s)',
     'End Date/Time', 'End Date', 'End Time', 'End (s)', 'End Serial', 'Archive',
     'Rules', 'Live', 'Time Class', 'Format', 'Rated', 'Time Control', 'Base', 'Inc', 'Corr', 'Duration', 'Duration (s)',
-    'Color', 'Opponent', 'My Rating', 'Opp Rating', 'Rating Before', 'Rating Δ',
+    'Color', 'Opponent', 'My Rating', 'Opp Rating', 'Rating Before', 'Rating Δ', 'Callback Status',
     'Outcome', 'Termination',
     'ECO', 'ECO URL',
     'Opening Name', 'Opening Slug', 'Opening Family', 'Opening Base',
@@ -508,7 +519,7 @@ function setupSheets() {
     .whenNumberGreaterThan(0)
     .setFontColor('#38761d')
     .setBold(true)
-    .setRanges([sheet.getRange('AD2:AD')])
+    .setRanges([sheet.getRange('AE2:AE')])
     .build());
 
   // Rating Delta: Negative (red text)
@@ -516,7 +527,15 @@ function setupSheets() {
     .whenNumberLessThan(0)
     .setFontColor('#cc0000')
     .setBold(true)
-    .setRanges([sheet.getRange('AD2:AD')])
+    .setRanges([sheet.getRange('AE2:AE')])
+    .build());
+
+  // Callback Status: Override (blue background)
+  newRules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('callback_override')
+    .setBackground('#cfe2f3')
+    .setBold(true)
+    .setRanges([sheet.getRange('AF2:AF')])
     .build());
 
   // Time Class colors
@@ -820,7 +839,7 @@ function extractECOFromPGN(pgn) {
   return '';
 }
 
-// ===== SIMPLIFIED OPENING DATA (FROM OLD.GS) =====
+// ===== ENHANCED OPENING DATA WITH FAMILY EXTRACTION =====
 function getOpeningDataForGame(ecoUrl) {
   if (!ecoUrl) return ['', '', '', '', '', '', '', '', '', '', ''];
   
@@ -834,18 +853,30 @@ function getOpeningDataForGame(ecoUrl) {
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
   
+  // Extract family from opening name (first major part)
+  let openingFamily = '';
+  if (openingName) {
+    const familyParts = openingName.split(' ');
+    if (familyParts.length >= 2) {
+      // Take first 2-3 words as family (e.g., "Sicilian Defense", "King's Indian")
+      openingFamily = familyParts.slice(0, Math.min(3, familyParts.length)).join(' ');
+    } else {
+      openingFamily = openingName;
+    }
+  }
+  
   return [
-    openingName,  // Opening Name
-    slug,         // Opening Slug
-    '',           // Opening Family
-    '',           // Opening Base
-    '',           // Variation 1
-    '',           // Variation 2
-    '',           // Variation 3
-    '',           // Variation 4
-    '',           // Variation 5
-    '',           // Variation 6
-    ''            // Extra Moves
+    openingName,     // Opening Name
+    slug,            // Opening Slug
+    openingFamily,   // Opening Family
+    openingName,     // Opening Base (same as name for now)
+    '',              // Variation 1
+    '',              // Variation 2
+    '',              // Variation 3
+    '',              // Variation 4
+    '',              // Variation 5
+    '',              // Variation 6
+    ''               // Extra Moves
   ];
 }
 
@@ -1289,4 +1320,251 @@ function generateDateRange(startDate, endDate) {
   }
   
   return dates;
+}
+
+// ===== CALLBACK INTEGRATION SYSTEM =====
+// Fetches callback data and overrides ratings when non-zero and different
+
+function enrichNewGamesWithCallbacks(count = 20) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const gamesSheet = ss.getSheetByName('Games');
+  
+  const lastRow = gamesSheet.getLastRow();
+  if (lastRow <= 1) {
+    ss.toast('No games to enrich', 'ℹ️', 3);
+    return;
+  }
+  
+  // Get the most recent games
+  const startRow = Math.max(2, lastRow - count + 1);
+  const numRows = lastRow - startRow + 1;
+  
+  const gameData = gamesSheet.getRange(startRow, 1, numRows, 53).getValues();
+  
+  ss.toast(`Enriching ${numRows} recent games with callbacks...`, '⏳', -1);
+  
+  let successCount = 0;
+  let overrideCount = 0;
+  let errorCount = 0;
+  
+  for (let i = 0; i < gameData.length; i++) {
+    const row = gameData[i];
+    const gameId = row[0]; // Game ID
+    const gameUrl = row[2]; // Game URL
+    const timeClass = row[15]; // Time Class
+    const currentRatingBefore = row[28]; // Rating Before
+    const currentRatingDelta = row[29]; // Rating Delta
+    
+    try {
+      // Fetch callback data
+      const callbackData = fetchCallbackData({
+        gameId: gameId,
+        gameUrl: gameUrl,
+        timeClass: timeClass
+      });
+      
+      if (callbackData && callbackData.myRatingBefore !== null && callbackData.myRatingChange !== null) {
+        const callbackRatingBefore = callbackData.myRatingBefore;
+        const callbackRatingChange = callbackData.myRatingChange;
+        
+        // Check if callback data is non-zero and different from current data
+        const isDifferent = (callbackRatingBefore !== currentRatingBefore) || (callbackRatingChange !== currentRatingDelta);
+        const isNonZero = callbackRatingChange !== 0;
+        
+        if (isDifferent && isNonZero) {
+          // Override with callback data
+          const actualRow = startRow + i;
+          gamesSheet.getRange(actualRow, 29).setValue(callbackRatingBefore); // Rating Before
+          gamesSheet.getRange(actualRow, 30).setValue(callbackRatingChange); // Rating Delta
+          gamesSheet.getRange(actualRow, 31).setValue('callback_override'); // Mark as overridden
+          
+          overrideCount++;
+          Logger.log(`Overrode ratings for game ${gameId}: ${currentRatingBefore}→${callbackRatingBefore}, ${currentRatingDelta}→${callbackRatingChange}`);
+        }
+        
+        successCount++;
+      }
+      
+      // Rate limiting
+      Utilities.sleep(500);
+      
+    } catch (error) {
+      Logger.log(`Error enriching game ${gameId}: ${error.message}`);
+      errorCount++;
+    }
+  }
+  
+  const statusMsg = `✅ Callback enrichment complete!\n\n` +
+    `Success: ${successCount}\n` +
+    `Rating Overrides: ${overrideCount}\n` +
+    `Errors: ${errorCount}`;
+  
+  ss.toast(statusMsg, errorCount > 0 ? '⚠️' : '✅', 8);
+  Logger.log(statusMsg);
+}
+
+// ===== CALLBACK DATA FETCHING =====
+function fetchCallbackData(game) {
+  if (!game || !game.gameId || !game.timeClass) {
+    Logger.log(`Skipping callback fetch - incomplete game data: ${JSON.stringify(game)}`);
+    return null;
+  }
+  
+  const gameId = game.gameId;
+  const timeClass = game.timeClass.toLowerCase();
+  const gameType = timeClass === 'daily' ? 'daily' : 'live';
+  const callbackUrl = `https://www.chess.com/callback/${gameType}/game/${gameId}`;
+  
+  Logger.log(`Fetching callback: ${callbackUrl}`);
+  
+  try {
+    const response = UrlFetchApp.fetch(callbackUrl, {muteHttpExceptions: true});
+    
+    if (response.getResponseCode() !== 200) {
+      Logger.log(`Callback API error for game ${gameId}: ${response.getResponseCode()}`);
+      return null;
+    }
+    
+    const data = JSON.parse(response.getContentText());
+    
+    if (!data || !data.game) {
+      Logger.log(`Invalid callback data for game ${gameId}`);
+      return null;
+    }
+    
+    const gameData = data.game;
+    const players = data.players || {};
+    const topPlayer = players.top || {};
+    const bottomPlayer = players.bottom || {};
+    
+    // Determine which player is white/black
+    let whitePlayer, blackPlayer;
+    if (topPlayer.color === 'white') {
+      whitePlayer = topPlayer;
+      blackPlayer = bottomPlayer;
+    } else {
+      whitePlayer = bottomPlayer;
+      blackPlayer = topPlayer;
+    }
+    
+    // Determine if we're white or black
+    let isWhite = false;
+    if (whitePlayer.username && whitePlayer.username.toLowerCase() === CONFIG.USERNAME.toLowerCase()) {
+      isWhite = true;
+    }
+    
+    // Get rating changes
+    let myRatingChange = isWhite ? gameData.ratingChangeWhite : gameData.ratingChangeBlack;
+    let oppRatingChange = isWhite ? gameData.ratingChangeBlack : gameData.ratingChangeWhite;
+    
+    // Get player objects
+    const myPlayer = isWhite ? whitePlayer : blackPlayer;
+    const oppPlayer = isWhite ? blackPlayer : whitePlayer;
+    
+    // Get current ratings
+    const myRating = myPlayer.rating || null;
+    const oppRating = oppPlayer.rating || null;
+    
+    // Calculate ratings before
+    let myRatingBefore = null;
+    let oppRatingBefore = null;
+    
+    if (myRating !== null && myRatingChange !== null && myRatingChange !== undefined) {
+      myRatingBefore = myRating - myRatingChange;
+    }
+    if (oppRating !== null && oppRatingChange !== null && oppRatingChange !== undefined) {
+      oppRatingBefore = oppRating - oppRatingChange;
+    }
+    
+    Logger.log(`Callback data fetched successfully for game ${gameId}`);
+    Logger.log(`  My rating: ${myRatingBefore} → ${myRating} (${myRatingChange > 0 ? '+' : ''}${myRatingChange})`);
+    
+    return {
+      gameId: gameId,
+      myRating: myRating,
+      oppRating: oppRating,
+      myRatingChange: myRatingChange,
+      oppRatingChange: oppRatingChange,
+      myRatingBefore: myRatingBefore,
+      oppRatingBefore: oppRatingBefore
+    };
+    
+  } catch (error) {
+    Logger.log(`Error fetching callback data for game ${gameId}: ${error.message}`);
+    return null;
+  }
+}
+
+// ===== MANUAL CALLBACK ENRICHMENT =====
+function enrichAllPendingCallbacks() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const gamesSheet = ss.getSheetByName('Games');
+  
+  const lastRow = gamesSheet.getLastRow();
+  if (lastRow <= 1) {
+    SpreadsheetApp.getUi().alert('No games found');
+    return;
+  }
+  
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert(
+    'Enrich All Games with Callbacks?',
+    `This will fetch callback data for all games and override ratings where different.\n\n` +
+    'This may take several minutes.\n\nContinue?',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (response === ui.Button.YES) {
+    enrichNewGamesWithCallbacks(lastRow - 1);
+  }
+}
+
+// ===== TEST CALLBACK FETCH =====
+function testCallbackFetch() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const gamesSheet = ss.getSheetByName('Games');
+  const lastRow = gamesSheet.getLastRow();
+  
+  if (lastRow <= 1) {
+    SpreadsheetApp.getUi().alert('No games found');
+    return;
+  }
+  
+  // Get the most recent game
+  const gameData = gamesSheet.getRange(lastRow, 1, 1, 53).getValues()[0];
+  
+  const game = {
+    gameId: gameData[0],
+    gameUrl: gameData[2],
+    timeClass: gameData[15]
+  };
+  
+  Logger.log('Testing callback fetch for most recent game...');
+  Logger.log('Game: ' + JSON.stringify(game));
+  
+  const callbackData = fetchCallbackData(game);
+  
+  if (callbackData) {
+    Logger.log('\n=== SUCCESS! ===');
+    Logger.log(JSON.stringify(callbackData, null, 2));
+    
+    SpreadsheetApp.getUi().alert(
+      'Callback Test Success!',
+      `Successfully fetched callback data!\n\n` +
+      `Game: ${callbackData.gameId}\n` +
+      `My Rating: ${callbackData.myRatingBefore} → ${callbackData.myRating} (${callbackData.myRatingChange > 0 ? '+' : ''}${callbackData.myRatingChange})\n\n` +
+      'Check View > Logs for full details.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  } else {
+    Logger.log('\n=== FAILED ===');
+    Logger.log('No callback data returned');
+    
+    SpreadsheetApp.getUi().alert(
+      'Callback Test Failed',
+      'Could not fetch callback data.\n\n' +
+      'Check View > Logs for error details.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  }
 }
