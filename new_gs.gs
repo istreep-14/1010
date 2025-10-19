@@ -25,7 +25,7 @@ function onOpen() {
       .addItem('Test Callback Fetch', 'testCallbackFetch')
       .addItem('View Callback Logs', 'viewCallbackLogs')
       .addItem('Clear Callback Logs', 'clearCallbackLogs')
-      .addItem('Enrich Recent Games (20)', 'enrichNewGamesWithCallbacks')
+      .addItem('Enrich Recent Games (20)', 'enrichRecentGamesImmediate')
       .addItem('Enrich All Games', 'enrichAllPendingCallbacks'))
     .addSeparator()
     .addItem('📊 Update Summary Stats', 'updateSummaryStats')
@@ -84,6 +84,12 @@ function fetchChesscomGames(fetchAll = false) {
     writeGamesToSheet(sheet, rows);
     
     ss.toast(`✅ ${newGames.length} new games!`, '✅', 5);
+    
+    // Automatically enrich with callbacks if we have new games
+    if (newGames.length > 0) {
+      ss.toast('Starting callback enrichment...', '⏳', 3);
+      enrichNewGamesWithCallbacks(newGames.length);
+    }
     
   } catch (error) {
     SpreadsheetApp.getUi().alert(`❌ Error: ${error.message}`);
@@ -175,10 +181,8 @@ function writeGamesToSheet(sheet, rows) {
   const startRow = sheet.getLastRow() + 1;
   sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
   
-  // After writing, check for callback data to override ratings
-  setTimeout(() => {
-    enrichNewGamesWithCallbacks(rows.length);
-  }, 1000);
+  // Note: Callback enrichment should be run manually via menu
+  // or automatically after the main fetch process completes
 }
 
 // ===== GAME PROCESSING (OPTIMIZED FROM OLD.GS) =====
@@ -1606,6 +1610,21 @@ function enrichAllPendingCallbacks() {
   if (response === ui.Button.YES) {
     enrichNewGamesWithCallbacks(lastRow - 1);
   }
+}
+
+// ===== IMMEDIATE CALLBACK ENRICHMENT =====
+function enrichRecentGamesImmediate() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const gamesSheet = ss.getSheetByName('Games');
+  
+  const lastRow = gamesSheet.getLastRow();
+  if (lastRow <= 1) {
+    ss.toast('No games found', '⚠️', 3);
+    return;
+  }
+  
+  // Enrich last 20 games immediately
+  enrichNewGamesWithCallbacks(20);
 }
 
 // ===== VIEW CALLBACK LOGS =====
