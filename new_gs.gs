@@ -22,16 +22,11 @@ function onOpen() {
     .addItem('📥 Fetch All History', 'fetchAllGames')
     .addSeparator()
     .addSubMenu(SpreadsheetApp.getUi().createMenu('⭐ Callbacks')
-      .addItem('Test Callback Fetch', 'testCallbackFetch')
-      .addItem('View Callback Logs', 'viewCallbackLogs')
-      .addItem('Clear Callback Logs', 'clearCallbackLogs')
-      .addSeparator()
-      .addItem('Update Pending Callbacks', 'updatePendingCallbacks')
-      .addItem('Enrich Recent Games (20)', 'enrichRecentGamesImmediate')
+      .addItem('Enrich Recent Games', 'enrichRecentGamesImmediate')
       .addItem('Enrich All Games', 'enrichAllPendingCallbacks')
+      .addItem('Fix Pending Games', 'fixPendingGames')
       .addSeparator()
-      .addItem('View Stored Data', 'viewStoredData')
-      .addItem('Clear Duplicate Data', 'clearDuplicateData'))
+      .addItem('Clear Data', 'clearDuplicateData'))
     .addSeparator()
     .addSubMenu(SpreadsheetApp.getUi().createMenu('📚 Openings')
       .addItem('Test Database Connection', 'testOpeningsDbConnection')
@@ -1904,23 +1899,7 @@ function getAllCallbackData() {
   return callbackData;
 }
 
-function viewStoredData() {
-  const callbackData = getAllCallbackData();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const callbackSheet = ss.getSheetByName('Callback Data');
-  const callbackCount = callbackSheet && callbackSheet.getLastRow() > 1 ? callbackSheet.getLastRow() - 1 : 0;
-  
-  const ui = SpreadsheetApp.getUi();
-  ui.alert(
-    'Stored Data Summary',
-    `📊 Google Sheets:\n` +
-    `• Callback Data: ${callbackCount} games\n\n` +
-    `📁 Storage Location:\n` +
-    `• Sheets: "Callback Data" tab only\n\n` +
-    `✅ Simplified: Only Sheets storage, no JSON files!`,
-    ui.ButtonSet.OK
-  );
-}
+// View stored data function removed - data is visible in sheets
 
 // Legacy export function removed
 
@@ -2081,7 +2060,7 @@ function enrichRecentGamesImmediate() {
 }
 
 // ===== UPDATE PENDING CALLBACKS =====
-function updatePendingCallbacks() {
+function fixPendingGames() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const gamesSheet = ss.getSheetByName('Games');
   
@@ -2189,84 +2168,13 @@ function updatePendingCallbacks() {
 }
 
 // ===== VIEW CALLBACK LOGS =====
-function viewCallbackLogs() {
-  const ui = SpreadsheetApp.getUi();
-  
-  ui.alert(
-    'Callback Logs',
-    'Callback data is logged to the Apps Script console.\n\n' +
-    'To view logs:\n' +
-    '1. Go to Extensions > Apps Script\n' +
-    '2. Click "View" > "Logs"\n' +
-    '3. Look for "CALLBACK DATA FOR GAME" entries\n\n' +
-    'Each log entry contains:\n' +
-    '• Game ID and context\n' +
-    '• Current vs Callback ratings\n' +
-    '• Analysis of differences\n' +
-    '• Override decisions\n\n' +
-    'Note: Logs are automatically cleared when you run new operations.',
-    ui.ButtonSet.OK
-  );
-}
+// Callback logs function removed - logs are in console
 
 // ===== CLEAR CALLBACK LOGS =====
-function clearCallbackLogs() {
-  // Clear the console logs
-  console.clear();
-  Logger.log('Callback logs cleared at ' + new Date().toISOString());
-  
-  SpreadsheetApp.getActiveSpreadsheet().toast('Callback logs cleared', 'ℹ️', 3);
-}
+// Clear logs function removed - logs clear automatically
 
 // ===== TEST CALLBACK FETCH =====
-function testCallbackFetch() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const gamesSheet = ss.getSheetByName('Games');
-  const lastRow = gamesSheet.getLastRow();
-  
-  if (lastRow <= 1) {
-    SpreadsheetApp.getUi().alert('No games found');
-    return;
-  }
-  
-  // Get the most recent game
-  const gameData = gamesSheet.getRange(lastRow, 1, 1, 53).getValues()[0];
-  
-  const game = {
-    gameId: gameData[0],
-    gameUrl: gameData[2],
-    timeClass: gameData[15]
-  };
-  
-  Logger.log('Testing callback fetch for most recent game...');
-  Logger.log('Game: ' + JSON.stringify(game));
-  
-  const callbackData = fetchCallbackData(game);
-  
-  if (callbackData) {
-    Logger.log('\n=== SUCCESS! ===');
-    Logger.log(JSON.stringify(callbackData, null, 2));
-    
-    SpreadsheetApp.getUi().alert(
-      'Callback Test Success!',
-      `Successfully fetched callback data!\n\n` +
-      `Game: ${callbackData.gameId}\n` +
-      `My Rating: ${callbackData.myRatingBefore} → ${callbackData.myRating} (${callbackData.myRatingChange > 0 ? '+' : ''}${callbackData.myRatingChange})\n\n` +
-      'Check View > Logs for full details.',
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  } else {
-    Logger.log('\n=== FAILED ===');
-    Logger.log('No callback data returned');
-    
-    SpreadsheetApp.getUi().alert(
-      'Callback Test Failed',
-      'Could not fetch callback data.\n\n' +
-      'Check View > Logs for error details.',
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  }
-}
+// Test function removed - use main enrich functions instead
 
 function clearDuplicateData() {
   try {
@@ -2274,7 +2182,7 @@ function clearDuplicateData() {
     PropertiesService.getScriptProperties().deleteProperty('GAME_LEDGER');
     PropertiesService.getScriptProperties().deleteProperty('LAST_SEEN_URL');
     
-    // Clear Sheets only
+    // Clear Callback Data sheet
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const callbackSheet = ss.getSheetByName('Callback Data');
     
@@ -2283,9 +2191,9 @@ function clearDuplicateData() {
       callbackSheet.getRange(1, 1, 1, 3).setValues([['Game ID', 'Timestamp', 'Callback Data']]);
     }
     
-    SpreadsheetApp.getUi().alert('✅ Cleared all duplicate data!\n\n• PropertiesService cleared\n• Sheets cleared\n\nReady for fresh data!');
+    SpreadsheetApp.getUi().alert('✅ Data cleared!\n\n• PropertiesService reset\n• Callback data cleared\n\nReady for fresh data!');
   } catch (error) {
-    SpreadsheetApp.getUi().alert(`❌ Error clearing data: ${error.message}`);
+    SpreadsheetApp.getUi().alert(`❌ Error: ${error.message}`);
   }
 }
 
