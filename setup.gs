@@ -182,6 +182,7 @@ function setupExpandedGamesSheet() {
   SpreadsheetApp.getUi().alert('✅ Expanded Games sheet setup complete!');
 }
 
+
 // ===== IMPROVED FORMAT DETECTION =====
 function getGameFormat(game) {
   const rules = (game.rules || 'chess').toLowerCase();
@@ -213,53 +214,4 @@ function getGameFormat(game) {
   if (estimated < 180) return 'bullet';
   if (estimated < 600) return 'blitz';
   return 'rapid';
-}
-
-// ===== GET OPENING DATA FOR GAME =====
-function getOpeningDataForGame(ecoUrl) {
-  if (!ecoUrl) return ['', '', '', '', '', '', '', '', '', '', ''];
-  
-  // Extract slug from ECO URL
-  const match = ecoUrl.match(/\/openings\/([^"]+)$/);
-  if (!match) return ['', '', '', '', '', '', '', '', '', '', ''];
-  
-  const slug = match[1];
-  const parts = slug.split('-');
-  
-  // Parse opening structure
-  const openingName = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
-  const openingSlug = slug;
-  
-  // Determine family, base, and variations
-  let family = '';
-  let base = '';
-  const variations = [];
-  
-  if (parts.length > 0) {
-    family = parts[0];
-  }
-  if (parts.length > 1) {
-    base = parts.slice(0, 2).join(' ');
-  }
-  if (parts.length > 2) {
-    for (let i = 2; i < Math.min(parts.length, 8); i++) {
-      variations.push(parts[i]);
-    }
-  }
-  
-  const extraMoves = parts.length > 8 ? parts.slice(8).join(' ') : '';
-  
-  // Pad variations array to 6 elements
-  while (variations.length < 6) {
-    variations.push('');
-  }
-  
-  return [
-    openingName,
-    openingSlug,
-    family,
-    base,
-    ...variations.slice(0, 6),
-    extraMoves
-  ];
 }
