@@ -1498,22 +1498,25 @@ function enrichNewGamesWithCallbacks(count = 20) {
 
 // ===== CALLBACK DATA STORAGE =====
 function storeCallbackData(gameId, callbackData) {
-  // Store comprehensive callback data in PropertiesService
-  const callbackKey = `callback_${gameId}`;
-  const callbackDataString = JSON.stringify(callbackData);
+  // Store in Google Sheets
+  storeCallbackDataInSheet(gameId, callbackData);
   
-  PropertiesService.getScriptProperties().setProperty(callbackKey, callbackDataString);
+  // Store in Google Drive as JSON file
+  storeCallbackDataInDrive(gameId, callbackData);
   
-  // Also log a summary
+  // Log summary
   const summary = `Game ${gameId}: My ${callbackData.myRatingBefore}→${callbackData.myRating} (${callbackData.myRatingChange > 0 ? '+' : ''}${callbackData.myRatingChange}), ` +
                   `Opp ${callbackData.oppRatingBefore}→${callbackData.oppRating} (${callbackData.oppRatingChange > 0 ? '+' : ''}${callbackData.oppRatingChange})`;
   Logger.log(`Stored callback data: ${summary}`);
 }
 
 function storeGamePGN(gameId, pgn) {
-  // Store PGN data in PropertiesService
-  const pgnKey = `pgn_${gameId}`;
-  PropertiesService.getScriptProperties().setProperty(pgnKey, pgn);
+  // Store PGN in Google Drive
+  storePGNInDrive(gameId, pgn);
+  
+  // Store PGN in Google Sheets
+  storePGNInSheet(gameId, pgn);
+  
   Logger.log(`Stored PGN for game ${gameId} (${pgn.length} characters)`);
 }
 
@@ -1547,6 +1550,7 @@ function getAllCallbackData() {
 }
 
 function clearCallbackData() {
+  // Clear from PropertiesService
   const properties = PropertiesService.getScriptProperties().getProperties();
   const keysToDelete = [];
   
@@ -1557,23 +1561,292 @@ function clearCallbackData() {
   }
   
   PropertiesService.getScriptProperties().deleteProperties(keysToDelete);
-  Logger.log(`Cleared ${keysToDelete.length} callback and PGN data entries`);
+  
+  // Clear from Google Sheets
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const callbackSheet = ss.getSheetByName('Callback Data');
+  const pgnSheet = ss.getSheetByName('PGN Data');
+  
+  if (callbackSheet) {
+    callbackSheet.clear();
+    callbackSheet.getRange(1, 1, 1, 27).setValues([[
+      'Game ID', 'Timestamp', 'Game URL', 'Callback URL', 'End Time', 'My Color', 'Time Class',
+      'My Rating', 'Opp Rating', 'My Rating Change', 'Opp Rating Change', 
+      'My Rating Before', 'Opp Rating Before', 'Base Time', 'Time Increment',
+      'My Username', 'My Country', 'My Membership', 'My Member Since',
+      'Opp Username', 'Opp Country', 'Opp Membership', 'Opp Member Since',
+      'Move Timestamps', 'My Location', 'Opp Location', 'Raw Data'
+    ]]);
+  }
+  
+  if (pgnSheet) {
+    pgnSheet.clear();
+    pgnSheet.getRange(1, 1, 1, 3).setValues([['Game ID', 'Timestamp', 'PGN']]);
+  }
+  
+  Logger.log(`Cleared all callback and PGN data from PropertiesService and Sheets`);
+}
+
+// ===== GOOGLE SHEETS STORAGE =====
+function storeCallbackDataInSheet(gameId, callbackData) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('Callback Data');
+  
+  if (!sheet) {
+    sheet = ss.insertSheet('Callback Data');
+    // Set headers
+    const headers = [
+      'Game ID', 'Timestamp', 'Game URL', 'Callback URL', 'End Time', 'My Color', 'Time Class',
+      'My Rating', 'Opp Rating', 'My Rating Change', 'Opp Rating Change', 
+      'My Rating Before', 'Opp Rating Before', 'Base Time', 'Time Increment',
+      'My Username', 'My Country', 'My Membership', 'My Member Since',
+      'Opp Username', 'Opp Country', 'Opp Membership', 'Opp Member Since',
+      'Move Timestamps', 'My Location', 'Opp Location', 'Raw Data'
+    ];
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+  
+  // Check if game already exists
+  const existingData = sheet.getDataRange().getValues();
+  let existingRow = -1;
+  for (let i = 1; i < existingData.length; i++) {
+    if (existingData[i][0] === gameId) {
+      existingRow = i + 1;
+      break;
+    }
+  }
+  
+  const rowData = [
+    gameId,
+    new Date().toISOString(),
+    callbackData.gameUrl || '',
+    callbackData.callbackUrl || '',
+    callbackData.endTime || '',
+    callbackData.myColor || '',
+    callbackData.timeClass || '',
+    callbackData.myRating || '',
+    callbackData.oppRating || '',
+    callbackData.myRatingChange || '',
+    callbackData.oppRatingChange || '',
+    callbackData.myRatingBefore || '',
+    callbackData.oppRatingBefore || '',
+    callbackData.baseTime || '',
+    callbackData.timeIncrement || '',
+    callbackData.myUsername || '',
+    callbackData.myCountry || '',
+    callbackData.myMembership || '',
+    callbackData.myMemberSince || '',
+    callbackData.oppUsername || '',
+    callbackData.oppCountry || '',
+    callbackData.oppMembership || '',
+    callbackData.oppMemberSince || '',
+    callbackData.moveTimestamps || '',
+    callbackData.myLocation || '',
+    callbackData.oppLocation || '',
+    JSON.stringify(callbackData)
+  ];
+  
+  if (existingRow > 0) {
+    // Update existing row
+    sheet.getRange(existingRow, 1, 1, rowData.length).setValues([rowData]);
+  } else {
+    // Add new row
+    sheet.appendRow(rowData);
+  }
+}
+
+function storePGNInSheet(gameId, pgn) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('PGN Data');
+  
+  if (!sheet) {
+    sheet = ss.insertSheet('PGN Data');
+    // Set headers
+    sheet.getRange(1, 1, 1, 3).setValues([['Game ID', 'Timestamp', 'PGN']]);
+  }
+  
+  // Check if game already exists
+  const existingData = sheet.getDataRange().getValues();
+  let existingRow = -1;
+  for (let i = 1; i < existingData.length; i++) {
+    if (existingData[i][0] === gameId) {
+      existingRow = i + 1;
+      break;
+    }
+  }
+  
+  const rowData = [gameId, new Date().toISOString(), pgn];
+  
+  if (existingRow > 0) {
+    // Update existing row
+    sheet.getRange(existingRow, 1, 1, 3).setValues([rowData]);
+  } else {
+    // Add new row
+    sheet.appendRow(rowData);
+  }
+}
+
+// ===== GOOGLE DRIVE STORAGE =====
+function storeCallbackDataInDrive(gameId, callbackData) {
+  try {
+    const folder = getOrCreateDataFolder();
+    const fileName = `callback_${gameId}.json`;
+    const files = folder.getFilesByName(fileName);
+    
+    if (files.hasNext()) {
+      // Update existing file
+      files.next().setContent(JSON.stringify(callbackData, null, 2));
+    } else {
+      // Create new file
+      folder.createFile(fileName, JSON.stringify(callbackData, null, 2));
+    }
+  } catch (error) {
+    Logger.log(`Error storing callback data in Drive: ${error.message}`);
+  }
+}
+
+function storePGNInDrive(gameId, pgn) {
+  try {
+    const folder = getOrCreateDataFolder();
+    const fileName = `pgn_${gameId}.txt`;
+    const files = folder.getFilesByName(fileName);
+    
+    if (files.hasNext()) {
+      // Update existing file
+      files.next().setContent(pgn);
+    } else {
+      // Create new file
+      folder.createFile(fileName, pgn);
+    }
+  } catch (error) {
+    Logger.log(`Error storing PGN in Drive: ${error.message}`);
+  }
+}
+
+function getOrCreateDataFolder() {
+  const folderName = 'Chess Data Storage';
+  const folders = DriveApp.getFoldersByName(folderName);
+  
+  if (folders.hasNext()) {
+    return folders.next();
+  } else {
+    return DriveApp.createFolder(folderName);
+  }
+}
+
+// ===== UPDATED GETTER FUNCTIONS =====
+function getCallbackData(gameId) {
+  // Try to get from sheet first
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Callback Data');
+  
+  if (sheet) {
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === gameId) {
+        return JSON.parse(data[i][26]); // Raw Data column
+      }
+    }
+  }
+  
+  // Fallback to Drive
+  try {
+    const folder = getOrCreateDataFolder();
+    const files = folder.getFilesByName(`callback_${gameId}.json`);
+    if (files.hasNext()) {
+      return JSON.parse(files.next().getBlob().getDataAsString());
+    }
+  } catch (error) {
+    Logger.log(`Error getting callback data: ${error.message}`);
+  }
+  
+  return null;
+}
+
+function getGamePGN(gameId) {
+  // Try to get from sheet first
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('PGN Data');
+  
+  if (sheet) {
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === gameId) {
+        return data[i][2]; // PGN column
+      }
+    }
+  }
+  
+  // Fallback to Drive
+  try {
+    const folder = getOrCreateDataFolder();
+    const files = folder.getFilesByName(`pgn_${gameId}.txt`);
+    if (files.hasNext()) {
+      return files.next().getBlob().getDataAsString();
+    }
+  } catch (error) {
+    Logger.log(`Error getting PGN: ${error.message}`);
+  }
+  
+  return null;
+}
+
+function getAllCallbackData() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Callback Data');
+  const callbackData = {};
+  
+  if (sheet) {
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      const gameId = data[i][0];
+      const rawData = data[i][26];
+      if (gameId && rawData) {
+        try {
+          callbackData[gameId] = JSON.parse(rawData);
+        } catch (error) {
+          Logger.log(`Error parsing callback data for game ${gameId}: ${error.message}`);
+        }
+      }
+    }
+  }
+  
+  return callbackData;
 }
 
 function viewStoredData() {
   const callbackData = getAllCallbackData();
-  const properties = PropertiesService.getScriptProperties().getProperties();
-  const pgnCount = Object.keys(properties).filter(key => key.startsWith('pgn_')).length;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const pgnSheet = ss.getSheetByName('PGN Data');
+  const pgnCount = pgnSheet ? pgnSheet.getLastRow() - 1 : 0;
+  
+  // Get Drive folder info
+  let driveInfo = 'Drive folder not accessible';
+  try {
+    const folder = getOrCreateDataFolder();
+    const files = folder.getFiles();
+    let fileCount = 0;
+    while (files.hasNext()) {
+      files.next();
+      fileCount++;
+    }
+    driveInfo = `Drive folder: ${fileCount} files`;
+  } catch (error) {
+    driveInfo = `Drive error: ${error.message}`;
+  }
   
   const ui = SpreadsheetApp.getUi();
   ui.alert(
     'Stored Data Summary',
-    `Callback Data: ${Object.keys(callbackData).length} games\n` +
-    `PGN Data: ${pgnCount} games\n\n` +
-    'To view specific data:\n' +
-    '1. Go to Extensions > Apps Script\n' +
-    '2. Click "View" > "Logs"\n' +
-    '3. Run "Export All Data" to see everything',
+    `📊 Google Sheets:\n` +
+    `• Callback Data: ${Object.keys(callbackData).length} games\n` +
+    `• PGN Data: ${pgnCount} games\n\n` +
+    `☁️ Google Drive:\n` +
+    `• ${driveInfo}\n\n` +
+    `📁 Storage Locations:\n` +
+    `• Sheets: "Callback Data" and "PGN Data" tabs\n` +
+    `• Drive: "Chess Data Storage" folder\n\n` +
+    `To view data: Run "Export All Data" or check the sheets directly`,
     ui.ButtonSet.OK
   );
 }
