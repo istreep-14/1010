@@ -1,48 +1,14 @@
-// ===== FETCH FUNCTIONS =====
-
-function fetchAllGames() {
-  fetchChesscomGames({ fetchAll: true });
-}
-
-function fetchSpecificMonth() {
-  const ui = SpreadsheetApp.getUi();
-  const response = ui.prompt(
-    'Fetch Specific Month',
-    'Enter archive in format YYYY-MM (e.g., 2025-10):',
-    ui.ButtonSet.OK_CANCEL
-  );
-  
-  if (response.getSelectedButton() === ui.Button.OK) {
-    const archiveMonth = response.getResponseText().trim();
-    
-    if (!/^\d{4}-\d{2}$/.test(archiveMonth)) {
-      ui.alert('Invalid format. Please use YYYY-MM (e.g., 2025-10)');
-      return;
-    }
-    
-    const [year, month] = archiveMonth.split('-');
-    const archiveUrl = `https://api.chess.com/pub/player/${CONFIG.USERNAME}/games/${year}/${month}`;
-    
-    fetchChesscomGames({ specificArchives: [archiveUrl] });
-  }
-}
+// ===== EXPANDED GAME FETCHING WITH ALL DATA =====
 
 function fetchChesscomGames(options = {}) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const gamesSheet = ss.getSheetByName(SHEETS.GAMES);
-  
-  if (!gamesSheet) {
-    SpreadsheetApp.getUi().alert('❌ Run "Setup Games Sheet" first!');
-    return;
-  }
-  
-  if (!CONFIG.CONTROL_SPREADSHEET_ID) {
-    SpreadsheetApp.getUi().alert('❌ Run "Setup Control Spreadsheet" first and add ID to CONFIG!');
-    return;
-  }
+  const { monthsToFetch = CONFIG.MONTHS_TO_FETCH, specificArchive = null } = options;
+  const ss = getMainSpreadsheet();
   
   try {
-    const archives = getArchivesToFetch(options);
+    ss.toast('Getting archives list...', '⏳', -1);
+    
+    // Get archives to fetch (auto-syncs archive list)
+    const archives = getArchivesToFetch({ monthsToFetch, specificArchive });
     
     if (!archives.length) {
       ss.toast('No archives to fetch', 'ℹ️', 3);
@@ -51,37 +17,57 @@ function fetchChesscomGames(options = {}) {
     
     ss.toast(`Fetching ${archives.length} archive(s)...`, '⏳', -1);
     
+    // Fetch games from archives
     const allGames = fetchGamesFromArchives(archives);
     
     if (!allGames.length) {
       ss.toast('No games found in archives', 'ℹ️', 3);
-      updateArchiveStatuses(archives, 0);
       return;
     }
     
-    const newGames = filterNewGames(allGames, gamesSheet);
+    // Filter to new games only (using archive anchors when possible)
+    const newGames = filterNewGames(allGames);
     
     if (!newGames.length) {
       ss.toast('No new games found', 'ℹ️', 3);
-      updateArchiveStatuses(archives, 0);
+      updateArchiveStatuses(archives, allGames);
       return;
     }
     
-    const ledger = getLastLedger(gamesSheet);
-    Logger.log('Starting ledger loaded: ' + JSON.stringify(ledger));
-    
     ss.toast(`Processing ${newGames.length} new games...`, '⏳', -1);
     
-    const gamesRows = processGames(newGames, CONFIG.USERNAME, ledger);
-    writeGamesToSheet(gamesSheet, gamesRows);
+    // Initialize ratings tracker
+    const ratingsTracker = new ImprovedRatingsTracker();
+    ratingsTracker.loadFromGamesSheet();
     
-    writeToControlSheets(newGames, ledger);
+    // Process and write games
+    const gamesRows = processExpandedGames(newGames, ratingsTracker);
+    writeGamesToSheet(gamesRows);
     
-    updateArchiveStatuses(archives, newGames.length);
+    // Update archives with last game IDs
+    updateArchiveStatuses(archives, allGames);
     
-    updateConfigAfterFetch(newGames.length);
+    // Update property
+    setProperty(PROP_KEYS.TOTAL_GAMES, 
+      (parseInt(getProperty(PROP_KEYS.TOTAL_GAMES, '0')) + newGames.length).toString()
+    );
     
     ss.toast(`✅ Added ${newGames.length} new games!`, '✅', 5);
+    
+    // Ask about callback enrichment
+    if (newGames.length > 0) {
+      const ui = SpreadsheetApp.getUi();
+      const response = ui.alert(
+        'Fetch Callbacks?',
+        `Would you like to fetch callback data for these ${newGames.length} new games?\n\n` +
+        'This will get accurate pre-game ratings and rating changes.',
+        ui.ButtonSet.YES_NO
+      );
+      
+      if (response === ui.Button.YES) {
+        enrichNewGamesWithCallbacks(newGames.length);
+      }
+    }
     
   } catch (error) {
     SpreadsheetApp.getUi().alert(`❌ Error: ${error.message}`);
@@ -89,112 +75,26 @@ function fetchChesscomGames(options = {}) {
   }
 }
 
-// ===== GET ARCHIVES TO FETCH =====
-function getArchivesToFetch(options) {
-  const {
-    fetchAll = false,
-    forceComplete = false,
-    specificArchives = [],
-    updateExisting = false
-  } = options;
-  
-  if (specificArchives.length > 0) {
-    return specificArchives;
-  }
-  
-  if (fetchAll || CONFIG.MONTHS_TO_FETCH === 0) {
-    return getAllArchives(CONFIG.USERNAME);
-  }
-  
-  const archivesSheet = getArchivesSheet();
-  const lastRow = archivesSheet.getLastRow();
-  
-  if (lastRow <= 1) {
-    return getRecentArchives(CONFIG.USERNAME, CONFIG.MONTHS_TO_FETCH);
-  }
-  
-  const data = archivesSheet.getRange(2, 1, lastRow - 1, ARCHIVE_COLS.NOTES).getValues();
-  
-  const archives = [];
-  
-  for (const row of data) {
-    const archiveUrl = row[ARCHIVE_COLS.ARCHIVE - 1];
-    const status = row[ARCHIVE_COLS.STATUS - 1];
-    
-    if (status !== 'complete' || forceComplete) {
-      archives.push(archiveUrl);
-    }
-  }
-  
-  return archives;
-}
-
-// ===== ARCHIVE FETCHING =====
-function getAllArchives(username) {
-  const url = `https://api.chess.com/pub/player/${username}/games/archives`;
-  const response = UrlFetchApp.fetch(url);
-  return JSON.parse(response.getContentText()).archives;
-}
-
-function getRecentArchives(username, months) {
-  const archives = [];
-  const now = new Date();
-  
-  for (let i = 0; i < months; i++) {
-    const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    archives.push(`https://api.chess.com/pub/player/${username}/games/${year}/${month}`);
-  }
-  
-  return archives;
-}
-
-// ===== GAME FETCHING =====
+// ===== FETCH GAMES FROM ARCHIVES =====
 function fetchGamesFromArchives(archiveUrls) {
-  const allGames = [];
-  const archivesSheet = getArchivesSheet();
+  const allGamesByArchive = {};
   
   for (const url of archiveUrls) {
     try {
       updateArchiveStatus(url, { status: 'fetching' });
       
-      const storedETag = getArchiveETag(url);
-      
-      const fetchOptions = {
-        muteHttpExceptions: true
-      };
-      
-      if (storedETag) {
-        fetchOptions.headers = {
-          'If-None-Match': storedETag
-        };
-      }
-      
-      const response = UrlFetchApp.fetch(url, fetchOptions);
-      const responseCode = response.getResponseCode();
-      
-      if (responseCode === 304) {
-        Logger.log(`Archive not modified: ${url}`);
-        updateArchiveStatus(url, { 
-          status: 'complete',
-          lastChecked: new Date(),
-          notes: 'No changes (304)'
-        });
-        Utilities.sleep(300);
-        continue;
-      }
-      
-      const newETag = response.getHeaders()['ETag'] || response.getHeaders()['etag'] || '';
-      
+      const response = UrlFetchApp.fetch(url);
       const data = JSON.parse(response.getContentText());
+      
       if (data.games) {
-        allGames.push(...data.games);
+        allGamesByArchive[url] = data.games;
         
+        const etag = response.getHeaders()['ETag'] || '';
         updateArchiveStatus(url, {
-          etag: newETag,
+          etag: etag,
           lastChecked: new Date(),
-          lastFetched: new Date()
+          lastFetched: new Date(),
+          gameCount: data.games.length
         });
       }
       
@@ -202,213 +102,245 @@ function fetchGamesFromArchives(archiveUrls) {
       
     } catch (e) {
       Logger.log(`Failed to fetch ${url}: ${e.message}`);
-      updateArchiveStatus(url, { 
-        status: 'error',
-        notes: e.message 
-      });
+      updateArchiveStatus(url, { status: 'error' });
     }
+  }
+  
+  // Flatten and sort by end time
+  const allGames = [];
+  for (const url in allGamesByArchive) {
+    allGamesByArchive[url].forEach(game => {
+      game._archiveUrl = url;  // Tag with archive URL
+      allGames.push(game);
+    });
   }
   
   return allGames.sort((a, b) => a.end_time - b.end_time);
 }
 
-// ===== NEW GAME DETECTION =====
-function filterNewGames(games, sheet) {
-  const existingGames = new Set();
-  const lastRow = sheet.getLastRow();
-  
-  if (lastRow > 1) {
-    const checkRows = Math.min(CONFIG.DUPLICATE_CHECK_ROWS, lastRow - 1);
-    const startRow = lastRow - checkRows + 1;
-    
-    Logger.log(`Checking last ${checkRows} rows for duplicates (rows ${startRow} to ${lastRow})`);
-    
-    const gameIds = sheet.getRange(startRow, GAMES_COLS.GAME_ID, checkRows, 2).getValues();
-    
-    for (const [gameId, gameType] of gameIds) {
-      existingGames.add(`${gameId}_${gameType}`);
-    }
-  }
-  
-  return games.filter(game => {
-    const gameId = game.url.split('/').pop();
-    const gameType = (game.time_class || '').toLowerCase() === 'daily' ? 'daily' : 'live';
-    return !existingGames.has(`${gameId}_${gameType}`);
-  });
-}
-
-// ===== LEDGER =====
-function getLastLedger(sheet) {
-  const lastRow = sheet.getLastRow();
-  
-  if (lastRow <= 1) return {};
-  
-  try {
-    const lastLedgerCell = sheet.getRange(lastRow, GAMES_COLS.RATINGS_LEDGER).getValue();
-    
-    if (!lastLedgerCell || lastLedgerCell === '') {
-      Logger.log('No ledger found in last row, returning empty ledger');
-      return {};
-    }
-    
-    const ledger = JSON.parse(lastLedgerCell);
-    Logger.log('Loaded ledger from last row: ' + JSON.stringify(ledger));
-    return ledger;
-    
-  } catch (e) {
-    Logger.log('Could not parse ledger: ' + e.message);
-    return {};
-  }
-}
-
-// ===== WRITING =====
-function writeGamesToSheet(sheet, rows) {
-  if (!rows.length) return;
-  
-  const startRow = sheet.getLastRow() + 1;
-  sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
-}
-
-// ===== WRITE TO CONTROL SHEETS =====
-function writeToControlSheets(games, startingLedger) {
+// ===== PROCESS EXPANDED GAMES =====
+function processExpandedGames(games, ratingsTracker) {
+  const rows = [];
   const now = new Date();
   
-  const registryRows = [];
-  const ratingsRows = [];
-  
-  let currentLedger = JSON.parse(JSON.stringify(startingLedger));
-  
   for (const game of games) {
-    if (!game || !game.url || !game.end_time) continue;
-    
-    const gameId = game.url.split('/').pop();
-    const gameType = (game.time_class || '').toLowerCase() === 'daily' ? 'daily' : 'live';
-    const format = getGameFormat(game).toLowerCase();
-    const endDate = new Date(game.end_time * 1000);
-    const archive = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}`;
-    
-    const isWhite = game.white?.username.toLowerCase() === CONFIG.USERNAME.toLowerCase();
-    const myRating = isWhite ? game.white?.rating : game.black?.rating;
-    const oppRating = isWhite ? game.black?.rating : game.white?.rating;
-    
-    const myRatingLast = currentLedger[format] || null;
-    const myRatingDelta = (myRatingLast !== null && myRating !== null) ? (myRating - myRatingLast) : null;
-    
-    if (myRating !== null) {
-      currentLedger[format] = myRating;
+    try {
+      if (!game || !game.url || !game.end_time) continue;
+      
+      const gameId = game.url.split('/').pop();
+      const gameType = (game.time_class || '').toLowerCase() === 'daily' ? 'daily' : 'live';
+      const endDate = new Date(game.end_time * 1000);
+      const archive = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}`;
+      
+      // Extract start time and duration from PGN
+      const startDate = extractStartFromPGN(game.pgn);
+      const duration = extractDurationFromPGN(game.pgn);
+      
+      // Determine player info
+      const isWhite = game.white?.username.toLowerCase() === CONFIG.USERNAME.toLowerCase();
+      const color = isWhite ? 'white' : 'black';
+      const opponent = (isWhite ? game.black?.username : game.white?.username || '').toLowerCase();
+      const myRating = isWhite ? game.white?.rating : game.black?.rating;
+      const oppRating = isWhite ? game.black?.rating : game.white?.rating;
+      
+      // Game details
+      const rules = (game.rules || 'chess').toLowerCase();
+      const isLive = gameType === 'live';
+      const timeClass = (game.time_class || '').toLowerCase();
+      const format = getGameFormat(game).toLowerCase();
+      const rated = game.rated || false;
+      
+      // Time control
+      const tcParsed = parseTimeControl(game.time_control, game.time_class);
+      
+      // Calculate ratings using tracker
+      const ratings = ratingsTracker.calculateRating(format, myRating);
+      
+      // Get outcome
+      const outcome = getGameOutcome(game, CONFIG.USERNAME).toLowerCase();
+      const termination = getGameTermination(game, CONFIG.USERNAME).toLowerCase();
+      
+      // Extract opening details
+      const ecoCode = extractECOCodeFromPGN(game.pgn) || '';
+      const ecoUrl = extractECOFromPGN(game.pgn) || '';
+      const openingData = getOpeningDataForGame(ecoUrl);
+      
+      // Move data
+      const moveData = extractMovesWithClocks(game.pgn, tcParsed.baseTime, tcParsed.increment);
+      const movesCount = moveData.plyCount > 0 ? Math.ceil(moveData.plyCount / 2) : 0;
+      
+      // Build row with ALL data
+      rows.push([
+        gameId,
+        gameType,
+        game.url,
+        game.pgn || '',
+        
+        // Dates & Times
+        startDate ? formatDateTime(startDate) : null,
+        startDate ? formatDate(startDate) : null,
+        startDate ? formatTime(startDate) : null,
+        startDate ? Math.floor(startDate.getTime() / 1000) : null,
+        formatDateTime(endDate),
+        formatDate(endDate),
+        formatTime(endDate),
+        game.end_time,
+        archive,
+        
+        // Game Details
+        rules,
+        isLive,
+        timeClass,
+        format,
+        rated,
+        game.time_control || '',
+        tcParsed.baseTime,
+        tcParsed.increment,
+        duration ? formatDuration(duration) : null,
+        duration || 0,
+        
+        // Players
+        color,
+        opponent,
+        
+        // Ratings
+        myRating,
+        oppRating,
+        ratings.before,
+        ratings.delta,
+        
+        // Result
+        outcome,
+        termination,
+        
+        // Opening (11 columns)
+        ecoCode,
+        ecoUrl,
+        ...openingData,
+        
+        // Move Data
+        movesCount,
+        game.tcn || '',
+        
+        // Enrichment Status
+        null,  // Callback status
+        null,  // Callback date
+        null,  // Lichess status
+        null,  // Lichess URL
+        
+        // Metadata
+        now,   // Fetch date
+        now    // Last updated
+      ]);
+      
+      // Add to registry
+      addToRegistry(gameId, archive, format);
+      
+    } catch (error) {
+      Logger.log(`Error processing game ${game?.url}: ${error.message}`);
+      continue;
     }
-    
-    const oppRatingDelta = myRatingDelta !== null ? myRatingDelta * -1 : null;
-    const oppRatingLast = (oppRatingDelta !== null && oppRating !== null) ? oppRating - oppRatingDelta : null;
-    
-    registryRows.push([
-      gameId,
-      archive,
-      endDate,
-      format,
-      now,
-      null,
-      null,
-      null,
-      null,
-      'Games'
-    ]);
-    
-    ratingsRows.push([
-      gameId,
-      game.url,
-      archive,
-      endDate,
-      format,
-      myRating,
-      myRatingLast,
-      myRatingDelta,
-      oppRating,
-      oppRatingDelta,
-      oppRatingLast,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      myRatingLast,
-      myRatingDelta,
-      oppRatingLast,
-      oppRatingDelta
-    ]);
   }
   
-  if (registryRows.length > 0) {
-    const registrySheet = getRegistrySheet();
-    const startRow = registrySheet.getLastRow() + 1;
-    registrySheet.getRange(startRow, 1, registryRows.length, registryRows[0].length).setValues(registryRows);
-    Logger.log(`Wrote ${registryRows.length} games to Registry`);
+  return rows;
+}
+
+// ===== WRITE GAMES TO SHEET =====
+function writeGamesToSheet(rows) {
+  if (!rows.length) return;
+  
+  const gamesSheet = getGamesSheet();
+  const startRow = gamesSheet.getLastRow() + 1;
+  
+  gamesSheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+  
+  Logger.log(`Wrote ${rows.length} games to sheet`);
+}
+
+// ===== UPDATE ARCHIVE STATUSES WITH LAST GAME IDS =====
+function updateArchiveStatuses(archives, allGames) {
+  const now = new Date();
+  
+  // Group games by archive
+  const gamesByArchive = {};
+  for (const game of allGames) {
+    const archiveUrl = game._archiveUrl;
+    if (archiveUrl) {
+      if (!gamesByArchive[archiveUrl]) {
+        gamesByArchive[archiveUrl] = [];
+      }
+      gamesByArchive[archiveUrl].push(game);
+    }
   }
   
-  if (ratingsRows.length > 0) {
-    const ratingsSheet = getRatingsSheet();
-    const startRow = ratingsSheet.getLastRow() + 1;
-    ratingsSheet.getRange(startRow, 1, ratingsRows.length, ratingsRows[0].length).setValues(ratingsRows);
-    Logger.log(`Wrote ${ratingsRows.length} games to Ratings`);
+  for (const archiveUrl of archives) {
+    const parts = archiveUrl.split('/');
+    const year = parseInt(parts[parts.length - 2]);
+    const month = parseInt(parts[parts.length - 1]);
+    
+    // Archive is complete if it's not current month
+    const archiveEndDate = new Date(year, month, 0);
+    const isComplete = now > archiveEndDate;
+    
+    // Get last game ID for this archive
+    const archiveGames = gamesByArchive[archiveUrl] || [];
+    const lastGameId = archiveGames.length > 0 
+      ? archiveGames[archiveGames.length - 1].url.split('/').pop()
+      : null;
+    
+    updateArchiveStatus(archiveUrl, {
+      status: isComplete ? 'complete' : 'pending',
+      lastChecked: now,
+      lastGameId: lastGameId
+    });
   }
 }
 
-// ===== POPULATE ARCHIVES =====
-function populateArchives() {
-  try {
-    const archivesSheet = getArchivesSheet();
-    
-    SpreadsheetApp.getActiveSpreadsheet().toast('Fetching archives list from Chess.com...', '⏳', -1);
-    
-    const url = `https://api.chess.com/pub/player/${CONFIG.USERNAME}/games/archives`;
-    const response = UrlFetchApp.fetch(url);
-    const data = JSON.parse(response.getContentText());
-    const archives = data.archives;
-    
-    if (!archives || !archives.length) {
-      SpreadsheetApp.getUi().alert('No archives found for user: ' + CONFIG.USERNAME);
-      return;
-    }
-    
-    const rows = [];
-    const now = new Date();
-    
-    for (const archiveUrl of archives) {
-      const parts = archiveUrl.split('/');
-      const year = parts[parts.length - 2];
-      const month = parts[parts.length - 1];
-      
-      rows.push([
-        archiveUrl,
-        year,
-        month,
-        'pending',
-        0,
-        now,
-        null,
-        null,
-        '',
-        'Games',
-        ''
-      ]);
-    }
-    
-    const startRow = archivesSheet.getLastRow() + 1;
-    archivesSheet.getRange(startRow, 1, rows.length, ARCHIVE_COLS.NOTES).setValues(rows);
-    
-    setConfig('Total Archives', archives.length);
-    
-    SpreadsheetApp.getActiveSpreadsheet().toast(
-      `✅ Added ${archives.length} archives!`, 
-      '✅', 
-      5
-    );
-    
-    Logger.log(`Populated ${archives.length} archives`);
-    
-  } catch (error) {
-    SpreadsheetApp.getUi().alert('❌ Error populating archives: ' + error.message);
-    Logger.log(error);
+// ===== HELPER: FORMAT DATE/TIME =====
+function formatDate(date) {
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'M/d/yy');
+}
+
+function formatTime(date) {
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'h:mm a');
+}
+
+function formatDateTime(date) {
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'M/d/yy h:mm a');
+}
+
+function formatDuration(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+// ===== HELPER: PARSE TIME CONTROL =====
+function parseTimeControl(timeControl, timeClass) {
+  if (!timeControl) {
+    return { baseTime: null, increment: null, correspondenceTime: null };
   }
+  
+  // Daily/correspondence
+  if (timeClass === 'daily') {
+    const match = timeControl.match(/(\d+)/);
+    return {
+      baseTime: null,
+      increment: null,
+      correspondenceTime: match ? parseInt(match[1]) : null
+    };
+  }
+  
+  // Live games (base+increment)
+  const match = timeControl.match(/(\d+)\+(\d+)/);
+  if (match) {
+    return {
+      baseTime: parseInt(match[1]),
+      increment: parseInt(match[2]),
+      correspondenceTime: null
+    };
+  }
+  
+  return { baseTime: null, increment: null, correspondenceTime: null };
 }
