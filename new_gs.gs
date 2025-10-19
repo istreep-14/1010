@@ -25,6 +25,8 @@ function onOpen() {
       .addItem('Test Callback Fetch', 'testCallbackFetch')
       .addItem('View Callback Logs', 'viewCallbackLogs')
       .addItem('Clear Callback Logs', 'clearCallbackLogs')
+      .addSeparator()
+      .addItem('Update Pending Callbacks', 'updatePendingCallbacks')
       .addItem('Enrich Recent Games (20)', 'enrichRecentGamesImmediate')
       .addItem('Enrich All Games', 'enrichAllPendingCallbacks'))
     .addSeparator()
@@ -555,6 +557,13 @@ function setupSheets() {
   newRules.push(SpreadsheetApp.newConditionalFormatRule()
     .whenTextEqualTo('fetched_zero')
     .setBackground('#fff2cc')
+    .setRanges([sheet.getRange('AF2:AF')])
+    .build());
+
+  // Callback Status: No Data (red background)
+  newRules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('no_data')
+    .setBackground('#f4cccc')
     .setRanges([sheet.getRange('AF2:AF')])
     .build());
 
@@ -1420,6 +1429,11 @@ function enrichNewGamesWithCallbacks(count = 20) {
         // Update status regardless of whether we overrode
         gamesSheet.getRange(actualRow, 31).setValue(status);
         successCount++;
+      } else {
+        // No callback data available - mark as failed
+        const actualRow = startRow + i;
+        gamesSheet.getRange(actualRow, 31).setValue('no_data');
+        Logger.log(`❌ NO DATA: Game ${gameId} - No callback data available`);
       }
       
       // Rate limiting
@@ -1625,6 +1639,119 @@ function enrichRecentGamesImmediate() {
   
   // Enrich last 20 games immediately
   enrichNewGamesWithCallbacks(20);
+}
+
+// ===== UPDATE PENDING CALLBACKS =====
+function updatePendingCallbacks() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const gamesSheet = ss.getSheetByName('Games');
+  
+  const lastRow = gamesSheet.getLastRow();
+  if (lastRow <= 1) {
+    ss.toast('No games found', '⚠️', 3);
+    return;
+  }
+  
+  // Find all rows with "pending" status
+  const statusColumn = 31; // AF column
+  const statusRange = gamesSheet.getRange(2, statusColumn, lastRow - 1, 1);
+  const statusValues = statusRange.getValues();
+  
+  let pendingCount = 0;
+  const pendingRows = [];
+  
+  for (let i = 0; i < statusValues.length; i++) {
+    if (statusValues[i][0] === 'pending') {
+      pendingCount++;
+      pendingRows.push(i + 2); // +2 because we start from row 2
+    }
+  }
+  
+  if (pendingCount === 0) {
+    ss.toast('No pending callbacks found', 'ℹ️', 3);
+    return;
+  }
+  
+  ss.toast(`Found ${pendingCount} pending callbacks. Processing...`, '⏳', 3);
+  
+  // Process each pending row
+  let successCount = 0;
+  let overrideCount = 0;
+  let errorCount = 0;
+  
+  for (const rowNum of pendingRows) {
+    try {
+      const gameData = gamesSheet.getRange(rowNum, 1, 1, 53).getValues()[0];
+      const gameId = gameData[0];
+      const gameUrl = gameData[2];
+      const timeClass = gameData[15];
+      const currentRatingBefore = gameData[28];
+      const currentRatingDelta = gameData[29];
+      
+      const callbackData = fetchCallbackData({
+        gameId: gameId,
+        gameUrl: gameUrl,
+        timeClass: timeClass
+      });
+      
+      if (callbackData && callbackData.myRatingBefore !== null && callbackData.myRatingChange !== null) {
+        const callbackRatingBefore = callbackData.myRatingBefore;
+        const callbackRatingChange = callbackData.myRatingChange;
+        
+        // Log comprehensive callback data
+        logCallbackData(gameId, callbackData, {
+          currentRatingBefore,
+          currentRatingDelta,
+          gameUrl,
+          timeClass
+        });
+        
+        // Check if callback data is non-zero and different from current data
+        const isDifferent = (callbackRatingBefore !== currentRatingBefore) || (callbackRatingChange !== currentRatingDelta);
+        const isNonZero = callbackRatingChange !== 0;
+        
+        let status = 'fetched';
+        
+        if (isDifferent && isNonZero) {
+          // Override with callback data
+          gamesSheet.getRange(rowNum, 29).setValue(callbackRatingBefore); // Rating Before
+          gamesSheet.getRange(rowNum, 30).setValue(callbackRatingChange); // Rating Delta
+          status = 'callback_override';
+          overrideCount++;
+          
+          Logger.log(`✅ OVERRIDE: Game ${gameId} - Ratings changed from ${currentRatingBefore}→${callbackRatingBefore}, ${currentRatingDelta}→${callbackRatingChange}`);
+        } else if (isDifferent && !isNonZero) {
+          status = 'fetched_zero';
+          Logger.log(`ℹ️ SAME ZERO: Game ${gameId} - Callback data same as sheet (both zero rating change)`);
+        } else {
+          Logger.log(`ℹ️ SAME DATA: Game ${gameId} - Callback data matches sheet data`);
+        }
+        
+        // Update status
+        gamesSheet.getRange(rowNum, 31).setValue(status);
+        successCount++;
+      } else {
+        // No callback data available
+        gamesSheet.getRange(rowNum, 31).setValue('no_data');
+        Logger.log(`❌ NO DATA: Game ${gameId} - No callback data available`);
+      }
+      
+      // Rate limiting
+      Utilities.sleep(500);
+      
+    } catch (error) {
+      Logger.log(`Error processing pending game at row ${rowNum}: ${error.message}`);
+      errorCount++;
+    }
+  }
+  
+  const statusMsg = `✅ Pending callbacks processed!\n\n` +
+    `Success: ${successCount}\n` +
+    `Rating Overrides: ${overrideCount}\n` +
+    `Errors: ${errorCount}`;
+  
+  ss.toast(statusMsg, errorCount > 0 ? '⚠️' : '✅', 8);
+  Logger.log(statusMsg);
 }
 
 // ===== VIEW CALLBACK LOGS =====
