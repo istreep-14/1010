@@ -28,7 +28,10 @@ function onOpen() {
       .addSeparator()
       .addItem('Update Pending Callbacks', 'updatePendingCallbacks')
       .addItem('Enrich Recent Games (20)', 'enrichRecentGamesImmediate')
-      .addItem('Enrich All Games', 'enrichAllPendingCallbacks'))
+      .addItem('Enrich All Games', 'enrichAllPendingCallbacks')
+      .addSeparator()
+      .addItem('View Stored Data', 'viewStoredData')
+      .addItem('Export All Data', 'exportAllData'))
     .addSeparator()
     .addItem('📊 Update Summary Stats', 'updateSummaryStats')
     .addToUi();
@@ -128,7 +131,31 @@ function fetchGamesFromArchives(archiveUrls) {
     try {
       const response = UrlFetchApp.fetch(url);
       const data = JSON.parse(response.getContentText());
-      if (data.games) allGames.push(...data.games);
+      if (data.games) {
+        // Fetch individual game data including PGN for each game
+        for (const game of data.games) {
+          try {
+            const gameId = game.url.split('/').pop();
+            const gameUrl = `https://www.chess.com/callback/game/${gameId}`;
+            const gameResponse = UrlFetchApp.fetch(gameUrl, {muteHttpExceptions: true});
+            
+            if (gameResponse.getResponseCode() === 200) {
+              const gameData = JSON.parse(gameResponse.getContentText());
+              if (gameData.game && gameData.game.pgn) {
+                // Store PGN data
+                storeGamePGN(gameId, gameData.game.pgn);
+              }
+            }
+            
+            // Rate limiting for individual game fetches
+            Utilities.sleep(100);
+          } catch (error) {
+            Logger.log(`Error fetching individual game ${game.url}: ${error.message}`);
+          }
+        }
+        
+        allGames.push(...data.games);
+      }
       Utilities.sleep(300);
     } catch (e) {
       Logger.log(`Failed to fetch ${url}: ${e.message}`);
@@ -1483,6 +1510,18 @@ function storeCallbackData(gameId, callbackData) {
   Logger.log(`Stored callback data: ${summary}`);
 }
 
+function storeGamePGN(gameId, pgn) {
+  // Store PGN data in PropertiesService
+  const pgnKey = `pgn_${gameId}`;
+  PropertiesService.getScriptProperties().setProperty(pgnKey, pgn);
+  Logger.log(`Stored PGN for game ${gameId} (${pgn.length} characters)`);
+}
+
+function getGamePGN(gameId) {
+  const pgnKey = `pgn_${gameId}`;
+  return PropertiesService.getScriptProperties().getProperty(pgnKey);
+}
+
 function getCallbackData(gameId) {
   const callbackKey = `callback_${gameId}`;
   const callbackDataString = PropertiesService.getScriptProperties().getProperty(callbackKey);
@@ -1512,13 +1551,67 @@ function clearCallbackData() {
   const keysToDelete = [];
   
   for (const key of Object.keys(properties)) {
-    if (key.startsWith('callback_')) {
+    if (key.startsWith('callback_') || key.startsWith('pgn_')) {
       keysToDelete.push(key);
     }
   }
   
   PropertiesService.getScriptProperties().deleteProperties(keysToDelete);
-  Logger.log(`Cleared ${keysToDelete.length} callback data entries`);
+  Logger.log(`Cleared ${keysToDelete.length} callback and PGN data entries`);
+}
+
+function viewStoredData() {
+  const callbackData = getAllCallbackData();
+  const properties = PropertiesService.getScriptProperties().getProperties();
+  const pgnCount = Object.keys(properties).filter(key => key.startsWith('pgn_')).length;
+  
+  const ui = SpreadsheetApp.getUi();
+  ui.alert(
+    'Stored Data Summary',
+    `Callback Data: ${Object.keys(callbackData).length} games\n` +
+    `PGN Data: ${pgnCount} games\n\n` +
+    'To view specific data:\n' +
+    '1. Go to Extensions > Apps Script\n' +
+    '2. Click "View" > "Logs"\n' +
+    '3. Run "Export All Data" to see everything',
+    ui.ButtonSet.OK
+  );
+}
+
+function exportAllData() {
+  const callbackData = getAllCallbackData();
+  const properties = PropertiesService.getScriptProperties().getProperties();
+  
+  Logger.log('\n=== EXPORTING ALL STORED DATA ===');
+  Logger.log(`Found ${Object.keys(callbackData).length} callback entries and ${Object.keys(properties).filter(key => key.startsWith('pgn_')).length} PGN entries\n`);
+  
+  // Export callback data
+  for (const [gameId, data] of Object.entries(callbackData)) {
+    Logger.log(`\n--- CALLBACK DATA FOR GAME ${gameId} ---`);
+    Logger.log(JSON.stringify(data, null, 2));
+  }
+  
+  // Export PGN data (first 5 games as example)
+  let pgnCount = 0;
+  for (const [key, value] of Object.entries(properties)) {
+    if (key.startsWith('pgn_') && pgnCount < 5) {
+      const gameId = key.replace('pgn_', '');
+      Logger.log(`\n--- PGN FOR GAME ${gameId} ---`);
+      Logger.log(value);
+      pgnCount++;
+    }
+  }
+  
+  if (pgnCount === 5) {
+    Logger.log('\n--- NOTE: Only showing first 5 PGNs to avoid log overflow ---');
+  }
+  
+  Logger.log('\n=== END EXPORT ===');
+  
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    `Exported ${Object.keys(callbackData).length} callback entries and ${Object.keys(properties).filter(key => key.startsWith('pgn_')).length} PGN entries to logs`,
+    '📊', 5
+  );
 }
 
 // ===== CALLBACK DATA FETCHING =====
@@ -1571,6 +1664,8 @@ function fetchCallbackData(game) {
       isWhite = true;
     }
     
+    const myColor = isWhite ? 'white' : 'black';
+    
     // Get rating changes
     let myRatingChange = isWhite ? gameData.ratingChangeWhite : gameData.ratingChangeBlack;
     let oppRatingChange = isWhite ? gameData.ratingChangeBlack : gameData.ratingChangeWhite;
@@ -1599,12 +1694,34 @@ function fetchCallbackData(game) {
     
     return {
       gameId: gameId,
+      gameUrl: game.gameUrl,
+      callbackUrl: callbackUrl,
+      endTime: gameData.endTime,
+      myColor: myColor,
+      timeClass: game.timeClass,
       myRating: myRating,
       oppRating: oppRating,
       myRatingChange: myRatingChange,
       oppRatingChange: oppRatingChange,
       myRatingBefore: myRatingBefore,
-      oppRatingBefore: oppRatingBefore
+      oppRatingBefore: oppRatingBefore,
+      baseTime: gameData.baseTime1 || 0,
+      timeIncrement: gameData.timeIncrement1 || 0,
+      moveTimestamps: gameData.moveTimestamps ? String(gameData.moveTimestamps) : '',
+      myUsername: myPlayer.username || '',
+      myCountry: myPlayer.countryName || '',
+      myMembership: myPlayer.membershipCode || '',
+      myMemberSince: myPlayer.memberSince || 0,
+      myDefaultTab: myPlayer.defaultTab || null,
+      myPostMoveAction: myPlayer.postMoveAction || '',
+      myLocation: myPlayer.location || '',
+      oppUsername: oppPlayer.username || '',
+      oppCountry: oppPlayer.countryName || '',
+      oppMembership: oppPlayer.membershipCode || '',
+      oppMemberSince: oppPlayer.memberSince || 0,
+      oppDefaultTab: oppPlayer.defaultTab || null,
+      oppPostMoveAction: oppPlayer.postMoveAction || '',
+      oppLocation: oppPlayer.location || ''
     };
     
   } catch (error) {
