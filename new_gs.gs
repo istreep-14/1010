@@ -56,10 +56,10 @@ function fetchChesscomGames(fetchAll = false) {
   }
   
   try {
-    // Get archives to fetch (optimized: only last 1 month for speed)
+    // Get archives to fetch
     const archives = fetchAll 
-      ? getAllArchives(CONFIG.USERNAME)
-      : getRecentArchives(CONFIG.USERNAME, 1); // Only last 1 month
+      ? getAllArchives(CONFIG.USERNAME)  // Full fetch: all archives
+      : getRecentArchives(CONFIG.USERNAME, 1); // Regular fetch: only last 1 month
     
     if (!archives.length) {
       ss.toast('No archives found', 'ℹ️', 3);
