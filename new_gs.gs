@@ -94,12 +94,6 @@ function fetchChesscomGames(fetchAll = false) {
     
     ss.toast(`✅ ${newGames.length} new games!`, '✅', 5);
     
-    // Automatically enrich with callbacks if we have new games
-    if (newGames.length > 0) {
-      ss.toast('Starting callback enrichment...', '⏳', 3);
-      enrichNewGamesWithCallbacks(newGames.length);
-    }
-    
   } catch (error) {
     SpreadsheetApp.getUi().alert(`❌ Error: ${error.message}`);
     Logger.log(error);
