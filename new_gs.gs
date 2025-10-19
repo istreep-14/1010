@@ -2673,22 +2673,32 @@ function storeMonthlyArchivesAsJSON() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     ss.toast('🔧 Dev Mode: Storing monthly archives as JSON...', '⏳', -1);
     
-    // Get all archives for ians141
+    // Get all archives for ians141 (returns array of URL strings)
     const allArchives = getAllArchives(CONFIG.USERNAME);
     Logger.log(`Found ${allArchives.length} archives to store`);
     
     const folder = getOrCreateDataFolder();
     let storedCount = 0;
     
-    for (const archive of allArchives) {
+    for (const archiveUrl of allArchives) {
       try {
-        Logger.log(`Storing: ${archive.url}`);
-        const response = UrlFetchApp.fetch(archive.url);
+        // Extract year and month from URL
+        const match = archiveUrl.match(/\/(\d{4})\/(\d{2})$/);
+        if (!match) {
+          Logger.log(`❌ Skipping invalid URL format: ${archiveUrl}`);
+          continue;
+        }
+        
+        const year = parseInt(match[1]);
+        const month = parseInt(match[2]);
+        
+        Logger.log(`Storing: ${archiveUrl}`);
+        const response = UrlFetchApp.fetch(archiveUrl);
         const data = JSON.parse(response.getContentText());
         
         if (data.games) {
           // Create filename: YYYY-MM.json
-          const filename = `${archive.year}-${String(archive.month).padStart(2, '0')}.json`;
+          const filename = `${year}-${String(month).padStart(2, '0')}.json`;
           
           // Store in Drive
           const fileContent = JSON.stringify(data, null, 2);
@@ -2700,7 +2710,7 @@ function storeMonthlyArchivesAsJSON() {
         
         Utilities.sleep(500); // Rate limiting
       } catch (error) {
-        Logger.log(`❌ Error storing ${archive.url}: ${error.message}`);
+        Logger.log(`❌ Error storing ${archiveUrl}: ${error.message}`);
       }
     }
     
