@@ -56,10 +56,10 @@ function fetchChesscomGames(fetchAll = false) {
   }
   
   try {
-    // Get archives to fetch
-    const archives = fetchAll || CONFIG.MONTHS_TO_FETCH === 0 
+    // Get archives to fetch (optimized: only last 1 month for speed)
+    const archives = fetchAll 
       ? getAllArchives(CONFIG.USERNAME)
-      : getRecentArchives(CONFIG.USERNAME, CONFIG.MONTHS_TO_FETCH);
+      : getRecentArchives(CONFIG.USERNAME, 1); // Only last 1 month
     
     if (!archives.length) {
       ss.toast('No archives found', 'ℹ️', 3);
@@ -124,35 +124,26 @@ function getRecentArchives(username, months) {
 // ===== GAME FETCHING =====
 function fetchGamesFromArchives(archiveUrls) {
   const allGames = [];
+  const lastSeenUrl = PropertiesService.getScriptProperties().getProperty('LAST_SEEN_URL') || '';
   
   for (const url of archiveUrls) {
     try {
+      // Skip if we've already processed this URL
+      if (url === lastSeenUrl) {
+        Logger.log(`Skipping already processed: ${url}`);
+        continue;
+      }
+      
       const response = UrlFetchApp.fetch(url);
       const data = JSON.parse(response.getContentText());
       if (data.games) {
-        // Fetch individual game data including PGN for each game
-        for (const game of data.games) {
-          try {
-            const gameId = game.url.split('/').pop();
-            const gameUrl = `https://www.chess.com/callback/game/${gameId}`;
-            const gameResponse = UrlFetchApp.fetch(gameUrl, {muteHttpExceptions: true});
-            
-            if (gameResponse.getResponseCode() === 200) {
-              const gameData = JSON.parse(gameResponse.getContentText());
-              if (gameData.game && gameData.game.pgn) {
-                // Store PGN data
-                storeGamePGN(gameId, gameData.game.pgn);
-              }
-            }
-            
-            // Rate limiting for individual game fetches
-            Utilities.sleep(100);
-          } catch (error) {
-            Logger.log(`Error fetching individual game ${game.url}: ${error.message}`);
-          }
-        }
+        // Skip individual game PGN fetching for speed
+        // PGN can be fetched later if needed via callbacks
         
         allGames.push(...data.games);
+        
+        // Update last seen URL
+        PropertiesService.getScriptProperties().setProperty('LAST_SEEN_URL', url);
       }
       Utilities.sleep(300);
     } catch (e) {
@@ -353,9 +344,9 @@ function processGames(games, username, ratingsLedger = {}) {
         openingData[9],            // AS: Variation 6
         openingData[10],           // AT: Extra Moves
         movesCount,                // AU: Moves
-        tcn,                       // AV: TCN
-        clocks,                    // AW: Clocks
-        ledgerString               // AX: Ratings Ledger
+        '',                        // AV: TCN (removed for speed)
+        '',                        // AW: Clocks (removed for speed)
+        JSON.stringify(currentLedger) // AX: Ratings Ledger
       ]);
       
     } catch (error) {
@@ -1083,6 +1074,22 @@ function loadOpeningsDb() {
     return OPENINGS_DB_CONFIG.cache;
   }
   
+  // Try to load from PropertiesService first (persistent cache)
+  try {
+    const cachedData = PropertiesService.getScriptProperties().getProperty('OPENINGS_CACHE');
+    if (cachedData) {
+      const parsed = JSON.parse(cachedData);
+      if (parsed.cache && parsed.timestamp && (now - parsed.timestamp) < OPENINGS_DB_CONFIG.CACHE_DURATION_MS) {
+        OPENINGS_DB_CONFIG.cache = new Map(Object.entries(parsed.cache));
+        OPENINGS_DB_CONFIG.lastCacheTime = parsed.timestamp;
+        Logger.log(`Loaded ${OPENINGS_DB_CONFIG.cache.size} openings from persistent cache`);
+        return OPENINGS_DB_CONFIG.cache;
+      }
+    }
+  } catch (error) {
+    Logger.log('Error loading from persistent cache: ' + error.message);
+  }
+  
   const cache = new Map();
   
   try {
@@ -1127,6 +1134,18 @@ function loadOpeningsDb() {
     
     OPENINGS_DB_CONFIG.cache = cache;
     OPENINGS_DB_CONFIG.lastCacheTime = now;
+    
+    // Save to persistent cache
+    try {
+      const cacheData = {
+        cache: Object.fromEntries(cache),
+        timestamp: now
+      };
+      PropertiesService.getScriptProperties().setProperty('OPENINGS_CACHE', JSON.stringify(cacheData));
+    } catch (error) {
+      Logger.log('Error saving to persistent cache: ' + error.message);
+    }
+    
     Logger.log(`Loaded ${cache.size} openings from external database`);
     
   } catch (error) {
