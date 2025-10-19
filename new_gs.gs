@@ -31,8 +31,7 @@ function onOpen() {
       .addItem('Enrich All Games', 'enrichAllPendingCallbacks')
       .addSeparator()
       .addItem('View Stored Data', 'viewStoredData')
-      .addItem('Clear Duplicate Data', 'clearDuplicateData')
-      .addItem('Export All Data', 'exportAllData'))
+      .addItem('Clear Duplicate Data', 'clearDuplicateData'))
     .addSeparator()
     .addSubMenu(SpreadsheetApp.getUi().createMenu('📚 Openings')
       .addItem('Test Database Connection', 'testOpeningsDbConnection')
@@ -1874,38 +1873,11 @@ function storeCallbackData(gameId, callbackData) {
   Logger.log(`Stored callback data: ${summary}`);
 }
 
-function storeGamePGN(gameId, pgn) {
-  // Store PGN in Google Drive
-  storePGNInDrive(gameId, pgn);
-  
-  // Store PGN in Google Sheets
-  storePGNInSheet(gameId, pgn);
-  
-  Logger.log(`Stored PGN for game ${gameId} (${pgn.length} characters)`);
-}
+// PGN storage removed
 
 // Legacy PropertiesService PGN getter removed
 
-// Legacy PropertiesService callback getter removed
-
-// Legacy PropertiesService callback data function removed
-
-// Legacy clear function removed
-
-// ===== GOOGLE SHEETS STORAGE =====
-// Legacy detailed callback storage removed
-
-// Legacy PGN storage removed
-
-// ===== GOOGLE DRIVE STORAGE (BATCHED) =====
-// Drive storage removed - only using Sheets now
-
-// Drive storage removed - only using Sheets now
-
-// Legacy Drive folder function removed
-
-// ===== UPDATED GETTER FUNCTIONS =====
-// Legacy detailed callback getter removed
+// ===== SIMPLIFIED CALLBACK SYSTEM =====
 
 // Legacy PGN getter removed
 
