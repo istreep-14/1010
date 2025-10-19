@@ -23,6 +23,8 @@ function onOpen() {
     .addSeparator()
     .addSubMenu(SpreadsheetApp.getUi().createMenu('⭐ Callbacks')
       .addItem('Test Callback Fetch', 'testCallbackFetch')
+      .addItem('View Callback Logs', 'viewCallbackLogs')
+      .addItem('Clear Callback Logs', 'clearCallbackLogs')
       .addItem('Enrich Recent Games (20)', 'enrichNewGamesWithCallbacks')
       .addItem('Enrich All Games', 'enrichAllPendingCallbacks'))
     .addSeparator()
@@ -535,6 +537,20 @@ function setupSheets() {
     .whenTextEqualTo('callback_override')
     .setBackground('#cfe2f3')
     .setBold(true)
+    .setRanges([sheet.getRange('AF2:AF')])
+    .build());
+
+  // Callback Status: Fetched (green background)
+  newRules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('fetched')
+    .setBackground('#d9ead3')
+    .setRanges([sheet.getRange('AF2:AF')])
+    .build());
+
+  // Callback Status: Fetched Zero (yellow background)
+  newRules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('fetched_zero')
+    .setBackground('#fff2cc')
     .setRanges([sheet.getRange('AF2:AF')])
     .build());
 
@@ -1367,21 +1383,38 @@ function enrichNewGamesWithCallbacks(count = 20) {
         const callbackRatingBefore = callbackData.myRatingBefore;
         const callbackRatingChange = callbackData.myRatingChange;
         
+        // Log comprehensive callback data
+        logCallbackData(gameId, callbackData, {
+          currentRatingBefore,
+          currentRatingDelta,
+          gameUrl,
+          timeClass
+        });
+        
         // Check if callback data is non-zero and different from current data
         const isDifferent = (callbackRatingBefore !== currentRatingBefore) || (callbackRatingChange !== currentRatingDelta);
         const isNonZero = callbackRatingChange !== 0;
         
+        const actualRow = startRow + i;
+        let status = 'fetched'; // Default status when data is fetched
+        
         if (isDifferent && isNonZero) {
           // Override with callback data
-          const actualRow = startRow + i;
           gamesSheet.getRange(actualRow, 29).setValue(callbackRatingBefore); // Rating Before
           gamesSheet.getRange(actualRow, 30).setValue(callbackRatingChange); // Rating Delta
-          gamesSheet.getRange(actualRow, 31).setValue('callback_override'); // Mark as overridden
-          
+          status = 'callback_override';
           overrideCount++;
-          Logger.log(`Overrode ratings for game ${gameId}: ${currentRatingBefore}→${callbackRatingBefore}, ${currentRatingDelta}→${callbackRatingChange}`);
+          
+          Logger.log(`✅ OVERRIDE: Game ${gameId} - Ratings changed from ${currentRatingBefore}→${callbackRatingBefore}, ${currentRatingDelta}→${callbackRatingChange}`);
+        } else if (isDifferent && !isNonZero) {
+          status = 'fetched_zero';
+          Logger.log(`ℹ️ SAME ZERO: Game ${gameId} - Callback data same as sheet (both zero rating change)`);
+        } else {
+          Logger.log(`ℹ️ SAME DATA: Game ${gameId} - Callback data matches sheet data`);
         }
         
+        // Update status regardless of whether we overrode
+        gamesSheet.getRange(actualRow, 31).setValue(status);
         successCount++;
       }
       
@@ -1389,7 +1422,23 @@ function enrichNewGamesWithCallbacks(count = 20) {
       Utilities.sleep(500);
       
     } catch (error) {
-      Logger.log(`Error enriching game ${gameId}: ${error.message}`);
+      const errorLog = {
+        timestamp: new Date().toISOString(),
+        gameId: gameId,
+        error: {
+          message: error.message,
+          stack: error.stack
+        },
+        context: {
+          gameUrl: gameUrl,
+          timeClass: timeClass
+        }
+      };
+      
+      Logger.log(`\n=== CALLBACK ERROR FOR GAME ${gameId} ===`);
+      Logger.log(JSON.stringify(errorLog, null, 2));
+      Logger.log(`=== END CALLBACK ERROR ===\n`);
+      
       errorCount++;
     }
   }
@@ -1401,6 +1450,46 @@ function enrichNewGamesWithCallbacks(count = 20) {
   
   ss.toast(statusMsg, errorCount > 0 ? '⚠️' : '✅', 8);
   Logger.log(statusMsg);
+}
+
+// ===== CALLBACK LOGGING =====
+function logCallbackData(gameId, callbackData, context) {
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    gameId: gameId,
+    context: {
+      gameUrl: context.gameUrl,
+      timeClass: context.timeClass,
+      currentRatingBefore: context.currentRatingBefore,
+      currentRatingDelta: context.currentRatingDelta
+    },
+    callbackData: {
+      myRating: callbackData.myRating,
+      oppRating: callbackData.oppRating,
+      myRatingChange: callbackData.myRatingChange,
+      oppRatingChange: callbackData.oppRatingChange,
+      myRatingBefore: callbackData.myRatingBefore,
+      oppRatingBefore: callbackData.oppRatingBefore
+    },
+    analysis: {
+      isDifferent: (callbackData.myRatingBefore !== context.currentRatingBefore) || 
+                   (callbackData.myRatingChange !== context.currentRatingDelta),
+      isNonZero: callbackData.myRatingChange !== 0,
+      willOverride: (callbackData.myRatingBefore !== context.currentRatingBefore) || 
+                    (callbackData.myRatingChange !== context.currentRatingDelta) && 
+                    callbackData.myRatingChange !== 0
+    }
+  };
+  
+  // Log as formatted JSON for easy reading
+  Logger.log(`\n=== CALLBACK DATA FOR GAME ${gameId} ===`);
+  Logger.log(JSON.stringify(logEntry, null, 2));
+  Logger.log(`=== END CALLBACK DATA ===\n`);
+  
+  // Also log a summary line
+  const summary = `Game ${gameId}: My ${callbackData.myRatingBefore}→${callbackData.myRating} (${callbackData.myRatingChange > 0 ? '+' : ''}${callbackData.myRatingChange}), ` +
+                  `Opp ${callbackData.oppRatingBefore}→${callbackData.oppRating} (${callbackData.oppRatingChange > 0 ? '+' : ''}${callbackData.oppRatingChange})`;
+  Logger.log(summary);
 }
 
 // ===== CALLBACK DATA FETCHING =====
@@ -1517,6 +1606,36 @@ function enrichAllPendingCallbacks() {
   if (response === ui.Button.YES) {
     enrichNewGamesWithCallbacks(lastRow - 1);
   }
+}
+
+// ===== VIEW CALLBACK LOGS =====
+function viewCallbackLogs() {
+  const ui = SpreadsheetApp.getUi();
+  
+  ui.alert(
+    'Callback Logs',
+    'Callback data is logged to the Apps Script console.\n\n' +
+    'To view logs:\n' +
+    '1. Go to Extensions > Apps Script\n' +
+    '2. Click "View" > "Logs"\n' +
+    '3. Look for "CALLBACK DATA FOR GAME" entries\n\n' +
+    'Each log entry contains:\n' +
+    '• Game ID and context\n' +
+    '• Current vs Callback ratings\n' +
+    '• Analysis of differences\n' +
+    '• Override decisions\n\n' +
+    'Note: Logs are automatically cleared when you run new operations.',
+    ui.ButtonSet.OK
+  );
+}
+
+// ===== CLEAR CALLBACK LOGS =====
+function clearCallbackLogs() {
+  // Clear the console logs
+  console.clear();
+  Logger.log('Callback logs cleared at ' + new Date().toISOString());
+  
+  SpreadsheetApp.getActiveSpreadsheet().toast('Callback logs cleared', 'ℹ️', 3);
 }
 
 // ===== TEST CALLBACK FETCH =====
