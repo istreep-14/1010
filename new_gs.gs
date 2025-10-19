@@ -1874,6 +1874,25 @@ function storeCallbackData(gameId, callbackData) {
 
 // ===== SIMPLIFIED CALLBACK SYSTEM =====
 
+function storeCallbackDataInSheet(gameId, callbackData) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('Callback Data');
+  
+  if (!sheet) {
+    sheet = ss.insertSheet('Callback Data');
+    sheet.getRange(1, 1, 1, 3).setValues([['Game ID', 'Timestamp', 'Callback Data']]);
+  }
+  
+  // Simple storage - just append the data
+  const rowData = [
+    gameId,
+    new Date().toISOString(),
+    JSON.stringify(callbackData)
+  ];
+  
+  sheet.appendRow(rowData);
+}
+
 // Legacy PGN getter removed
 
 function getAllCallbackData() {
