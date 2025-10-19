@@ -1451,44 +1451,56 @@ function enrichNewGamesWithCallbacks(count = 20) {
   Logger.log(statusMsg);
 }
 
-// ===== CALLBACK LOGGING =====
-function logCallbackData(gameId, callbackData, context) {
-  const logEntry = {
-    timestamp: new Date().toISOString(),
-    gameId: gameId,
-    context: {
-      gameUrl: context.gameUrl,
-      timeClass: context.timeClass,
-      currentRatingBefore: context.currentRatingBefore,
-      currentRatingDelta: context.currentRatingDelta
-    },
-    callbackData: {
-      myRating: callbackData.myRating,
-      oppRating: callbackData.oppRating,
-      myRatingChange: callbackData.myRatingChange,
-      oppRatingChange: callbackData.oppRatingChange,
-      myRatingBefore: callbackData.myRatingBefore,
-      oppRatingBefore: callbackData.oppRatingBefore
-    },
-    analysis: {
-      isDifferent: (callbackData.myRatingBefore !== context.currentRatingBefore) || 
-                   (callbackData.myRatingChange !== context.currentRatingDelta),
-      isNonZero: callbackData.myRatingChange !== 0,
-      willOverride: (callbackData.myRatingBefore !== context.currentRatingBefore) || 
-                    (callbackData.myRatingChange !== context.currentRatingDelta) && 
-                    callbackData.myRatingChange !== 0
-    }
-  };
+// ===== CALLBACK DATA STORAGE =====
+function storeCallbackData(gameId, callbackData) {
+  // Store comprehensive callback data in PropertiesService
+  const callbackKey = `callback_${gameId}`;
+  const callbackDataString = JSON.stringify(callbackData);
   
-  // Log as formatted JSON for easy reading
-  Logger.log(`\n=== CALLBACK DATA FOR GAME ${gameId} ===`);
-  Logger.log(JSON.stringify(logEntry, null, 2));
-  Logger.log(`=== END CALLBACK DATA ===\n`);
+  PropertiesService.getScriptProperties().setProperty(callbackKey, callbackDataString);
   
-  // Also log a summary line
+  // Also log a summary
   const summary = `Game ${gameId}: My ${callbackData.myRatingBefore}→${callbackData.myRating} (${callbackData.myRatingChange > 0 ? '+' : ''}${callbackData.myRatingChange}), ` +
                   `Opp ${callbackData.oppRatingBefore}→${callbackData.oppRating} (${callbackData.oppRatingChange > 0 ? '+' : ''}${callbackData.oppRatingChange})`;
-  Logger.log(summary);
+  Logger.log(`Stored callback data: ${summary}`);
+}
+
+function getCallbackData(gameId) {
+  const callbackKey = `callback_${gameId}`;
+  const callbackDataString = PropertiesService.getScriptProperties().getProperty(callbackKey);
+  
+  if (callbackDataString) {
+    return JSON.parse(callbackDataString);
+  }
+  return null;
+}
+
+function getAllCallbackData() {
+  const properties = PropertiesService.getScriptProperties().getProperties();
+  const callbackData = {};
+  
+  for (const [key, value] of Object.entries(properties)) {
+    if (key.startsWith('callback_')) {
+      const gameId = key.replace('callback_', '');
+      callbackData[gameId] = JSON.parse(value);
+    }
+  }
+  
+  return callbackData;
+}
+
+function clearCallbackData() {
+  const properties = PropertiesService.getScriptProperties().getProperties();
+  const keysToDelete = [];
+  
+  for (const key of Object.keys(properties)) {
+    if (key.startsWith('callback_')) {
+      keysToDelete.push(key);
+    }
+  }
+  
+  PropertiesService.getScriptProperties().deleteProperties(keysToDelete);
+  Logger.log(`Cleared ${keysToDelete.length} callback data entries`);
 }
 
 // ===== CALLBACK DATA FETCHING =====
