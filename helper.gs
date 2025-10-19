@@ -1,40 +1,26 @@
 // ===== COMPREHENSIVE HELPER FUNCTIONS =====
 // PGN parsing, opening extraction, game processing utilities
+// WITH ALL FIXES APPLIED
 
-// ===== EXTRACT START TIME FROM PGN =====
-function extractStartFromPGN(pgn) {
-  if (!pgn) return null;
+// ===== CALCULATE START TIME FROM END - DURATION =====
+// NEW: Most reliable way to get start time with correct timezone
+function calculateStartFromEnd(endDate, durationSeconds) {
+  // Calculate start time from end time minus duration
+  // This ensures timezone consistency automatically
   
-  try {
-    // Look for StartTime tag: [StartTime "HH:MM:SS"]
-    const startTimeMatch = pgn.match(/\[StartTime\s+"([^"]+)"\]/);
-    
-    // Look for Date and UTCDate tags
-    const dateMatch = pgn.match(/\[Date\s+"([^"]+)"\]/);
-    const utcDateMatch = pgn.match(/\[UTCDate\s+"([^"]+)"\]/);
-    
-    if (startTimeMatch && (dateMatch || utcDateMatch)) {
-      const time = startTimeMatch[1];
-      const date = utcDateMatch ? utcDateMatch[1] : dateMatch[1];
-      
-      // Parse date (format: YYYY.MM.DD)
-      const dateParts = date.split('.');
-      if (dateParts.length === 3) {
-        const [year, month, day] = dateParts.map(p => parseInt(p));
-        
-        // Parse time (format: HH:MM:SS)
-        const timeParts = time.split(':');
-        if (timeParts.length === 3) {
-          const [hour, minute, second] = timeParts.map(p => parseInt(p));
-          
-          return new Date(year, month - 1, day, hour, minute, second);
-        }
-      }
-    }
-  } catch (error) {
-    Logger.log(`Error parsing start time from PGN: ${error.message}`);
+  if (!endDate || !durationSeconds || durationSeconds <= 0) {
+    return null;
   }
   
+  const startDate = new Date(endDate.getTime() - (durationSeconds * 1000));
+  return startDate;
+}
+
+// ===== EXTRACT START TIME FROM PGN =====
+// DEPRECATED: No longer used, kept for backward compatibility
+function extractStartFromPGN(pgn) {
+  // This function is deprecated - we now calculate start from end - duration
+  // Kept for backward compatibility but returns null
   return null;
 }
 
@@ -43,12 +29,11 @@ function extractDurationFromPGN(pgn) {
   if (!pgn) return null;
   
   try {
-    const startDate = extractStartFromPGN(pgn);
+    const startDate = extractStartDateFromPGNForDuration(pgn);
     
     // Also look for EndTime or EndDate
     const endTimeMatch = pgn.match(/\[EndTime\s+"([^"]+)"\]/);
     const endDateMatch = pgn.match(/\[EndDate\s+"([^"]+)"\]/);
-    const utcTimeMatch = pgn.match(/\[UTCTime\s+"([^"]+)"\]/);
     
     if (startDate && endTimeMatch && endDateMatch) {
       const time = endTimeMatch[1];
@@ -71,6 +56,38 @@ function extractDurationFromPGN(pgn) {
     }
   } catch (error) {
     Logger.log(`Error parsing duration from PGN: ${error.message}`);
+  }
+  
+  return null;
+}
+
+// Helper for duration extraction only
+function extractStartDateFromPGNForDuration(pgn) {
+  if (!pgn) return null;
+  
+  try {
+    const startTimeMatch = pgn.match(/\[StartTime\s+"([^"]+)"\]/);
+    const dateMatch = pgn.match(/\[Date\s+"([^"]+)"\]/);
+    const utcDateMatch = pgn.match(/\[UTCDate\s+"([^"]+)"\]/);
+    
+    if (startTimeMatch && (dateMatch || utcDateMatch)) {
+      const time = startTimeMatch[1];
+      const date = utcDateMatch ? utcDateMatch[1] : dateMatch[1];
+      
+      const dateParts = date.split('.');
+      if (dateParts.length === 3) {
+        const [year, month, day] = dateParts.map(p => parseInt(p));
+        
+        const timeParts = time.split(':');
+        if (timeParts.length === 3) {
+          const [hour, minute, second] = timeParts.map(p => parseInt(p));
+          
+          return new Date(year, month - 1, day, hour, minute, second);
+        }
+      }
+    }
+  } catch (error) {
+    Logger.log(`Error parsing start time for duration: ${error.message}`);
   }
   
   return null;
@@ -184,13 +201,22 @@ function getGameOutcome(game, username) {
   return 'unknown';
 }
 
-// ===== GET GAME TERMINATION =====
+// ===== GET GAME TERMINATION (FIXED) =====
+// FIX: When you win, use opponent's result for more meaningful termination
 function getGameTermination(game, username) {
   if (!game.white || !game.black) return 'unknown';
   
   const isWhite = game.white.username.toLowerCase() === username.toLowerCase();
   const myResult = isWhite ? game.white.result : game.black.result;
+  const oppResult = isWhite ? game.black.result : game.white.result;
   
+  // FIX: If I won, use opponent's result for termination
+  // This gives more meaningful termination reasons like "checkmated", "resigned", "timeout"
+  if (myResult === 'win') {
+    return oppResult || 'win';
+  }
+  
+  // Otherwise use my result
   return myResult || 'unknown';
 }
 
@@ -228,49 +254,6 @@ function getGameFormat(game) {
   if (estimated < 180) return 'bullet';
   if (estimated < 600) return 'blitz';
   return 'rapid';
-}
-
-// ===== GET OPENING DATA FOR GAME =====
-function getOpeningDataForGame(ecoUrl) {
-  if (!ecoUrl) return ['', '', '', '', '', '', '', '', '', '', ''];
-  
-  // Extract slug from ECO URL
-  const match = ecoUrl.match(/\/openings\/([^"]+)$/);
-  if (!match) return ['', '', '', '', '', '', '', '', '', '', ''];
-  
-  const slug = match[1];
-  const parts = slug.split('-');
-  
-  // Build opening name
-  const openingName = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
-  const openingSlug = slug;
-  
-  // Determine structure
-  let family = parts[0] || '';
-  let base = parts.length > 1 ? parts.slice(0, 2).join('-') : '';
-  
-  // Extract variations (positions 2-7)
-  const variations = [];
-  for (let i = 2; i < Math.min(parts.length, 8); i++) {
-    variations.push(parts[i]);
-  }
-  
-  // Extra moves (position 8+)
-  const extraMoves = parts.length > 8 ? parts.slice(8).join('-') : '';
-  
-  // Pad variations to 6 elements
-  while (variations.length < 6) {
-    variations.push('');
-  }
-  
-  return [
-    openingName,
-    openingSlug,
-    family,
-    base,
-    ...variations.slice(0, 6),
-    extraMoves
-  ];
 }
 
 // ===== PARSE TIME CONTROL =====
