@@ -6,7 +6,6 @@ function onOpen() {
     .addSubMenu(ui.createMenu('⚙️ Setup')
       .addItem('Setup All Sheets', 'setupAll')
       .addItem('Setup Games Sheet', 'setupExpandedGamesSheet')
-      .addItem('Setup Summary Sheet', 'setupSummarySheet')
       .addSeparator()
       .addItem('Show Configuration', 'showConfiguration')
       .addItem('Reset All Connections', 'resetAllConnections'))
@@ -35,10 +34,6 @@ function onOpen() {
       .addSeparator()
       .addItem('Lichess Guide', 'showLichessMenu'))
     
-    .addSeparator()
-    
-    .addItem('📊 View Summary', 'goToSummary')
-    
     .addToUi();
 }
 
@@ -49,7 +44,6 @@ function setupAll() {
     'Setup All Sheets?',
     'This will set up:\n' +
     '• Games sheet (main spreadsheet)\n' +
-    '• Summary sheet (main spreadsheet)\n' +
     '• Control sheets (auto-created)\n' +
     '• Enrichment sheets (auto-created)\n\n' +
     'Continue?',
@@ -63,11 +57,9 @@ function setupAll() {
     
     // Main sheets
     setupExpandedGamesSheet();
-    setupSummarySheet();
     
     // Control sheets
     setupArchivesSheet();
-    setupRegistrySheet();
     
     // Enrichment sheets
     setupCallbackSheet();
@@ -171,18 +163,6 @@ function showEnrichmentStatus() {
     .setHeight(400);
   
   SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'Enrichment Status');
-}
-
-// ===== NAVIGATION =====
-function goToSummary() {
-  const ss = getMainSpreadsheet();
-  const summarySheet = ss.getSheetByName('Summary');
-  
-  if (summarySheet) {
-    ss.setActiveSheet(summarySheet);
-  } else {
-    SpreadsheetApp.getUi().alert('Summary sheet not found. Run "Setup Summary Sheet" first.');
-  }
 }
 
 // ===== FETCH SPECIFIC MONTH =====
